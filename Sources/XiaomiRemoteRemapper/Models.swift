@@ -38,23 +38,39 @@ enum RemoteAction: String, Codable, CaseIterable {
 struct KeyMapping: Codable, Equatable {
     let usage: HIDUsage
     var action: RemoteAction
-    let keyName: String
+    var keyName: String
+
+    var sourceCodeName: String {
+        switch (usage.page, usage.usage) {
+        case (7, 241): return "特殊键"
+        case (7, 62): return "F5"
+        case (7, 74): return "Home"
+        case (7, 101): return "Application"
+        case (7, 53): return "` / ~"
+        case (7, 102): return "Power"
+        default: return "HID"
+        }
+    }
+
+    var technicalDescription: String {
+        "\(sourceCodeName) · \(usage)"
+    }
 }
 
 struct AppConfiguration: Codable, Equatable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     var schemaVersion: Int? = currentSchemaVersion
     var boundSerial: String?
     var mappings: [KeyMapping]
 
     static let defaultMappings: [KeyMapping] = [
-        KeyMapping(usage: HIDUsage(page: 7, usage: 241), action: .delete, keyName: "usage 7:241"),
-        KeyMapping(usage: HIDUsage(page: 7, usage: 62), action: .fnModifier, keyName: "F5"),
-        KeyMapping(usage: HIDUsage(page: 7, usage: 74), action: .passThrough, keyName: "Home"),
-        KeyMapping(usage: HIDUsage(page: 7, usage: 101), action: .activateCodex, keyName: "Application"),
-        KeyMapping(usage: HIDUsage(page: 7, usage: 53), action: .passThrough, keyName: "` / ~"),
-        KeyMapping(usage: HIDUsage(page: 7, usage: 102), action: .power, keyName: "Power")
+        KeyMapping(usage: HIDUsage(page: 7, usage: 241), action: .delete, keyName: "返回键"),
+        KeyMapping(usage: HIDUsage(page: 7, usage: 62), action: .fnModifier, keyName: "语音键"),
+        KeyMapping(usage: HIDUsage(page: 7, usage: 74), action: .passThrough, keyName: "主页键"),
+        KeyMapping(usage: HIDUsage(page: 7, usage: 101), action: .activateCodex, keyName: "菜单键"),
+        KeyMapping(usage: HIDUsage(page: 7, usage: 53), action: .passThrough, keyName: "直播键"),
+        KeyMapping(usage: HIDUsage(page: 7, usage: 102), action: .power, keyName: "电源键")
     ]
 
     static let defaults = AppConfiguration(

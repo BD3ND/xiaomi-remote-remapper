@@ -5,6 +5,8 @@ final class EventEmitter {
     private let source = CGEventSource(stateID: .combinedSessionState)
     private let codexInputFocuser = CodexInputFocuser()
     private var fnIsDown = false
+    private var deleteIsDown = false
+    private var deleteRepeatTimer: DispatchSourceTimer?
 
     var accessibilityTrusted: Bool {
         AXIsProcessTrusted()
@@ -21,7 +23,7 @@ final class EventEmitter {
         case .passThrough:
             break
         case .delete:
-            postKey(keyCode: 51, isDown: isDown)
+            postDelete(isDown: isDown)
         case .fnModifier:
             postFn(isDown: isDown)
         case .showDesktop:
@@ -37,16 +39,55 @@ final class EventEmitter {
         }
     }
 
-    func releaseHeldModifiers() {
+    func releaseHeldInputs() {
+        stopDeleteRepeat(postKeyUp: true)
         if fnIsDown { postFn(isDown: false) }
     }
 
-    private func postKey(keyCode: CGKeyCode, isDown: Bool, flags: CGEventFlags = []) {
+    private func postDelete(isDown: Bool) {
+        if isDown {
+            guard !deleteIsDown else { return }
+            deleteIsDown = true
+            postKey(keyCode: 51, isDown: true)
+
+            let timer = DispatchSource.makeTimerSource(queue: .main)
+            let delay = max(NSEvent.keyRepeatDelay, 0.1)
+            let interval = max(NSEvent.keyRepeatInterval, 0.02)
+            timer.schedule(deadline: .now() + delay, repeating: interval, leeway: .milliseconds(2))
+            timer.setEventHandler { [weak self] in
+                guard let self, self.deleteIsDown else { return }
+                self.postKey(keyCode: 51, isDown: true, isRepeat: true)
+            }
+            deleteRepeatTimer = timer
+            timer.resume()
+        } else {
+            stopDeleteRepeat(postKeyUp: true)
+        }
+    }
+
+    private func stopDeleteRepeat(postKeyUp: Bool) {
+        deleteRepeatTimer?.setEventHandler {}
+        deleteRepeatTimer?.cancel()
+        deleteRepeatTimer = nil
+        guard deleteIsDown else { return }
+        deleteIsDown = false
+        if postKeyUp { postKey(keyCode: 51, isDown: false) }
+    }
+
+    private func postKey(
+        keyCode: CGKeyCode,
+        isDown: Bool,
+        flags: CGEventFlags = [],
+        isRepeat: Bool = false
+    ) {
         guard let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: isDown) else {
             AppLogger.shared.log("event_create_failed keyCode=\(keyCode)")
             return
         }
         event.flags = flags
+        if isRepeat {
+            event.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+        }
         event.post(tap: .cghidEventTap)
     }
 

@@ -11,12 +11,13 @@ final class SettingsWindowController: NSWindowController {
         self.onConfigurationChange = onConfigurationChange
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 590, height: 440),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 475),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         window.title = "小米遥控器按键映射"
+        window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
         buildUI()
@@ -32,8 +33,10 @@ final class SettingsWindowController: NSWindowController {
     private func buildUI() {
         guard let contentView = window?.contentView else { return }
 
-        let title = NSTextField(labelWithString: "目标设备：VID 10007 / PID 12984（独占模式）")
+        let title = NSTextField(labelWithString: "目标设备：小米蓝牙遥控器 2 Pro")
         title.font = .boldSystemFont(ofSize: 14)
+        let deviceDetail = NSTextField(labelWithString: "VID 10007 / PID 12984 · 共享/独占模式自动选择")
+        deviceDetail.textColor = .secondaryLabelColor
         serialLabel.textColor = .secondaryLabelColor
 
         mappingsStack.orientation = .vertical
@@ -46,10 +49,10 @@ final class SettingsWindowController: NSWindowController {
         buttons.orientation = .horizontal
         buttons.spacing = 10
 
-        let note = NSTextField(wrappingLabelWithString: "修改后会立即保存并重新打开设备。Power 在独占模式下使用 macOS 系统 Power 事件重放，不是原始 HID 报告透传。")
+        let note = NSTextField(wrappingLabelWithString: "修改后立即保存，并安全释放按住的 Fn、刷新抑制映射、重新打开设备。选择“保持原按键”时不会屏蔽该键。Power 的默认动作是系统事件重放，并非字节级透传。")
         note.textColor = .secondaryLabelColor
 
-        let root = NSStackView(views: [title, serialLabel, mappingsStack, note, buttons])
+        let root = NSStackView(views: [title, deviceDetail, serialLabel, mappingsStack, note, buttons])
         root.orientation = .vertical
         root.alignment = .leading
         root.spacing = 14
@@ -70,8 +73,10 @@ final class SettingsWindowController: NSWindowController {
             view.removeFromSuperview()
         }
 
-        for mapping in store.configuration.mappings.sorted(by: { $0.usage < $1.usage }) {
-            let label = NSTextField(labelWithString: "\(mapping.keyName)  [\(mapping.usage)]")
+        for mapping in store.configuration.mappings {
+            let label = NSTextField(
+                labelWithString: "\(mapping.keyName)（\(mapping.sourceCodeName)）  [\(mapping.usage)]"
+            )
             label.widthAnchor.constraint(equalToConstant: 220).isActive = true
             let popup = NSPopUpButton(frame: .zero, pullsDown: false)
             popup.addItems(withTitles: RemoteAction.allCases.map(\.displayName))

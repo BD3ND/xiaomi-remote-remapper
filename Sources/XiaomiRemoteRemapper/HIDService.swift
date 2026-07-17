@@ -124,7 +124,7 @@ final class HIDService {
     }
 
     func stop() {
-        emitter.releaseHeldModifiers()
+        emitter.releaseHeldInputs()
         connectedDevices.removeAll()
         pressedUsages.removeAll()
         closeManager()
@@ -172,7 +172,7 @@ final class HIDService {
 
     private func deviceRemoved(_ device: IOHIDDevice) {
         connectedDevices.remove(device)
-        emitter.releaseHeldModifiers()
+        emitter.releaseHeldInputs()
         pressedUsages.removeAll()
         state = connectedDevices.isEmpty ? .waiting : state
         AppLogger.shared.log("device_disconnected remaining=\(connectedDevices.count)")

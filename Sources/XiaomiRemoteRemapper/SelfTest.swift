@@ -18,6 +18,19 @@ func runSelfTests() -> Int32 {
         failures.append("default mapping \(usage) should be \(action.rawValue)")
     }
 
+    let expectedNames: [(HIDUsage, String)] = [
+        (HIDUsage(page: 7, usage: 241), "返回键"),
+        (HIDUsage(page: 7, usage: 62), "语音键"),
+        (HIDUsage(page: 7, usage: 74), "主页键"),
+        (HIDUsage(page: 7, usage: 101), "菜单键"),
+        (HIDUsage(page: 7, usage: 53), "直播键"),
+        (HIDUsage(page: 7, usage: 102), "电源键")
+    ]
+    for (usage, name) in expectedNames
+        where AppConfiguration.defaultMappings.first(where: { $0.usage == usage })?.keyName != name {
+        failures.append("default mapping \(usage) should be named \(name)")
+    }
+
     let suppression = SuppressionMappingController.suppressionJSON(for: AppConfiguration.defaultMappings)
     if suppression.contains("0x70000004a") || suppression.contains("0x700000035") {
         failures.append("pass-through keys were included in suppression mapping")
@@ -51,12 +64,36 @@ func runSelfTests() -> Int32 {
         if reloaded.configuration.action(for: HIDUsage(page: 7, usage: 241)) != .delete {
             failures.append("default mapping was not restored")
         }
+
+        let migrationURL = directory.appendingPathComponent("legacy-config.json")
+        var legacyMappings = AppConfiguration.defaultMappings.map {
+            KeyMapping(usage: $0.usage, action: $0.action, keyName: $0.sourceCodeName)
+        }
+        legacyMappings[3].action = .logOnly
+        let legacy = AppConfiguration(
+            schemaVersion: 2,
+            boundSerial: "legacy-serial",
+            mappings: legacyMappings
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(legacy).write(to: migrationURL)
+
+        let migrated = ConfigurationStore(fileURL: migrationURL)
+        if migrated.configuration.schemaVersion != AppConfiguration.currentSchemaVersion {
+            failures.append("legacy configuration schema was not migrated")
+        }
+        if migrated.configuration.mappings.map(\.keyName) != AppConfiguration.defaultMappings.map(\.keyName) {
+            failures.append("legacy key names were not migrated to remote button names")
+        }
+        if migrated.configuration.action(for: HIDUsage(page: 7, usage: 101)) != .logOnly {
+            failures.append("key name migration changed a customized action")
+        }
     } catch {
         failures.append("configuration persistence threw: \(error)")
     }
 
     if failures.isEmpty {
-        print("self_test_passed assertions=12")
+        print("self_test_passed assertions=21")
         return 0
     }
     failures.forEach { fputs("self_test_failed \($0)\n", stderr) }

@@ -67,10 +67,16 @@ final class ConfigurationStore {
     private static func mergedWithDefaults(_ saved: AppConfiguration) -> (configuration: AppConfiguration, changed: Bool) {
         var mappings = saved.mappings
         var changed = false
-        for defaultMapping in AppConfiguration.defaultMappings
-            where !mappings.contains(where: { $0.usage == defaultMapping.usage }) {
-            mappings.append(defaultMapping)
-            changed = true
+        for defaultMapping in AppConfiguration.defaultMappings {
+            if let index = mappings.firstIndex(where: { $0.usage == defaultMapping.usage }) {
+                if mappings[index].keyName != defaultMapping.keyName {
+                    mappings[index].keyName = defaultMapping.keyName
+                    changed = true
+                }
+            } else {
+                mappings.append(defaultMapping)
+                changed = true
+            }
         }
 
         // Schema 2 deliberately returns Home and Grave/Tilde to macOS. Older
