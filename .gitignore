@@ -1,0 +1,11 @@
+.build/
+dist/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.cer
+*.key
+*.p12
+*.pem
+local-signing.env
