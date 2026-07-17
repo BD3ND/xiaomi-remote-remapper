@@ -36,7 +36,7 @@ Power 需要特别说明：设备被独占后，原始 HID 报告不会再进入
 
 ## 安装
 
-macOS 不使用 Windows `.exe`。对应的双击应用是 `.app`，推荐分发形式是 `.dmg`：
+macOS 对应的双击应用是 `.app`，推荐分发形式是 `.dmg`：
 
 1. 双击 `XiaomiRemoteRemapper.dmg`。
 2. 将 `XiaomiRemoteRemapper.app` 拖到 `Applications`。
