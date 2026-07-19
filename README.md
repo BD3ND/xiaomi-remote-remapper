@@ -16,11 +16,15 @@
 | 返回键 | 特殊键 · `7:241` | 删除键 |
 | 语音键 | F5 · `7:62` | Fn 按下/松开 |
 | 主页键 | Home · `7:74` | 保持原按键，不拦截 |
-| 菜单键 | Application · `7:101` | 将 Codex 调到前台，并按当前窗口尺寸点击输入区聚焦 |
+| 菜单键 | Application · `7:101` | 将 Codex 调到前台，并调用 Codex 原生输入框聚焦命令 |
 | 直播键 | `` ` / ~ `` · `7:53` | 保持原按键，不拦截 |
 | 电源键 | Power · `7:102` | macOS Power 系统事件重放 |
 
 返回键短按产生一次 Delete；按住超过 macOS 的按键重复延迟后，会按系统当前重复速度连续删除，松开、断连、睡眠或退出时立即停止。
+
+“配置按键…”中的第一批遥控器向动作包括：Tab、Escape、Page Up、Page Down、Space、Return、Mission Control、显示桌面、Spotlight、播放/暂停和静音。Return 可能确认当前操作或发送输入内容，因此在列表中带有风险提示。新增动作不会自动改写默认映射。
+
+“显示桌面”、Mission Control 和 Spotlight 会在每次触发时读取 macOS 当前系统快捷键并发送完整组合键；用户只需按对应遥控器按键，无需同时操作 Mac 键盘。若系统没有保存有效的自定义配置，则分别回退到 Apple 默认的 `Fn-H`、`Control-↑` 与 `Command-Space`。如果用户在系统设置中明确禁用了对应快捷键，程序不会绕过该设置强行触发，并会在日志中记录跳过原因。
 
 Power 需要特别说明：设备被独占后，原始 HID 报告不会再进入系统，因此这里是 `NX_SYSDEFINED/NX_POWER_KEY` 重放，并非字节级透传。请先验证短按行为，不要直接连续或长按 Power。
 
@@ -32,7 +36,7 @@ Power 需要特别说明：设备被独占后，原始 HID 报告不会再进入
 - 首次连接会绑定所发现遥控器的序列号，后续使用 VID、PID 和序列号共同匹配；可以在映射窗口中解除绑定。
 - 不同型号、地区版本、固件或 HID usage 可能需要新增设备匹配和映射，不能保证直接兼容。
 - Karabiner、其他 HID 映射程序和旧 `hidutil UserKeyMapping` 可能造成抢占、双触发或无响应。
-- Codex 聚焦功能依赖 `com.openai.codex` 和当前窗口结构；Codex 界面更新后可能需要调整。
+- Codex 聚焦功能依赖 `com.openai.codex` 当前版本的原生 Escape 聚焦行为；程序不会移动鼠标或点击屏幕坐标。Codex 界面行为更新后可能需要调整。
 
 ## 安装
 
@@ -57,7 +61,7 @@ macOS 对应的双击应用是 `.app`，推荐分发形式是 `.dmg`：
 open dist/XiaomiRemoteRemapper.dmg
 ```
 
-`check.sh` 会执行 debug/release 编译、21 项内置自检、App bundle 打包、签名、DMG 打包和镜像校验。生成物为：
+`check.sh` 会执行 debug/release 编译、30 项内置自检、App bundle 打包、签名、DMG 打包和镜像校验。生成物为：
 
 - `dist/XiaomiRemoteRemapper.app`
 - `dist/XiaomiRemoteRemapper.dmg`
@@ -162,7 +166,7 @@ open -n /Applications/XiaomiRemoteRemapper.app --args --disable-login-item
 - 返回键短按只产生一次 Delete；长按按系统速度连续删除，松开、断连、睡眠和退出后立即停止。
 - F5 按住时，能与 MacBook 内置键盘的按键形成 Fn 组合；松开或蓝牙断开后不残留 Fn 状态。
 - Home 和反引号不进入抑制映射，保持系统收到的原始行为。
-- Application 唤起已安装的 `com.openai.codex`，并按窗口尺寸定位输入区获取焦点。
+- Application 唤起已安装的 `com.openai.codex`，并调用 Codex 原生 Escape 聚焦行为；不移动鼠标、不依赖输入框位置。
 - Power 短按行为与未独占前一致；长按、重复 HID down 报告不会被重复重放。
 - 蓝牙断开和重连后自动恢复，不需要退出程序。
 - 睡眠/唤醒、锁屏、解锁、快速切换用户后，连接状态与权限状态正确。

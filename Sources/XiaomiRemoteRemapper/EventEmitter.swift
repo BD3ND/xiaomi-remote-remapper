@@ -22,16 +22,34 @@ final class EventEmitter {
         switch action {
         case .passThrough:
             break
+        case .tab:
+            postKey(keyCode: 48, isDown: isDown)
+        case .escape:
+            postKey(keyCode: 53, isDown: isDown)
+        case .pageUp:
+            postKey(keyCode: 116, isDown: isDown)
+        case .pageDown:
+            postKey(keyCode: 121, isDown: isDown)
+        case .space:
+            postKey(keyCode: 49, isDown: isDown)
+        case .returnKey:
+            postKey(keyCode: 36, isDown: isDown)
+        case .missionControl:
+            if isDown { postSystemShortcut(.missionControl) }
+        case .showDesktop:
+            if isDown { postSystemShortcut(.showDesktop) }
+        case .spotlight:
+            if isDown { postSystemShortcut(.spotlight) }
+        case .playPause:
+            postSystemDefined(keyType: 16, isDown: isDown)
+        case .mute:
+            postSystemDefined(keyType: 7, isDown: isDown)
         case .delete:
             postDelete(isDown: isDown)
         case .fnModifier:
             postFn(isDown: isDown)
-        case .showDesktop:
-            if isDown { postShortcut(keyCode: 103, flags: []) }
         case .activateCodex:
             if isDown { codexInputFocuser.activateAndFocus() }
-        case .spotlight:
-            if isDown { postShortcut(keyCode: 49, flags: .maskCommand) }
         case .power:
             postSystemDefined(keyType: 6, isDown: isDown)
         case .logOnly:
@@ -105,6 +123,18 @@ final class EventEmitter {
     private func postShortcut(keyCode: CGKeyCode, flags: CGEventFlags) {
         postKey(keyCode: keyCode, isDown: true, flags: flags)
         postKey(keyCode: keyCode, isDown: false, flags: flags)
+    }
+
+    private func postSystemShortcut(_ shortcut: SystemShortcutResolver.Shortcut) {
+        let resolution = SystemShortcutResolver.resolve(shortcut)
+        AppLogger.shared.log(
+            "system_shortcut action=\(shortcut) \(resolution.diagnosticDescription)"
+        )
+        guard resolution.isEnabled else {
+            AppLogger.shared.log("system_shortcut_skipped action=\(shortcut) reason=disabled")
+            return
+        }
+        postShortcut(keyCode: resolution.keyCode, flags: resolution.flags)
     }
 
     // IOHID 独占后系统收不到遥控器的 Power 报告。这里重放 macOS 的

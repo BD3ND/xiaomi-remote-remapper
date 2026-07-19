@@ -132,9 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         inputPermissionItem.title = "输入监控：\(accessName(inputAccess))"
         accessibilityItem.title = "辅助功能：\(emitter.accessibilityTrusted ? "已授权" : "未授权")"
 
-        if #available(macOS 13.0, *) {
-            loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        }
+        loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
 
         let ready: Bool
         if case .connected = hidService.state {
@@ -143,12 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ready = false
         }
         statusItem.button?.contentTintColor = ready ? .systemGreen : .systemOrange
-        let loginEnabled: Bool
-        if #available(macOS 13.0, *) {
-            loginEnabled = SMAppService.mainApp.status == .enabled
-        } else {
-            loginEnabled = false
-        }
+        let loginEnabled = SMAppService.mainApp.status == .enabled
         mainController.refresh(
             connection: hidService.state,
             inputPermissionName: accessName(inputAccess),
@@ -211,12 +204,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleLoginItem() {
-        guard #available(macOS 13.0, *) else { return }
         setLoginItem(SMAppService.mainApp.status != .enabled)
     }
 
     private func setLoginItem(_ enabled: Bool) {
-        guard #available(macOS 13.0, *) else { return }
         do {
             if enabled, SMAppService.mainApp.status != .enabled {
                 try SMAppService.mainApp.register()

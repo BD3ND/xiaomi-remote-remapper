@@ -13,22 +13,54 @@ struct HIDUsage: Hashable, Codable, Comparable, CustomStringConvertible {
 
 enum RemoteAction: String, Codable, CaseIterable {
     case passThrough = "passThrough"
+    case tab = "tab"
+    case escape = "escape"
+    case pageUp = "pageUp"
+    case pageDown = "pageDown"
+    case space = "space"
+    case returnKey = "return"
+    case missionControl = "missionControl"
+    case showDesktop = "showDesktop"
+    case spotlight = "spotlight"
+    case playPause = "playPause"
+    case mute = "mute"
     case delete = "delete"
     case fnModifier = "fn"
-    case showDesktop = "showDesktop"
     case activateCodex = "activateCodex"
-    case spotlight = "spotlight"
     case power = "power"
     case logOnly = "logOnly"
+
+    static let remoteFirstBatch: [RemoteAction] = [
+        .tab,
+        .escape,
+        .pageUp,
+        .pageDown,
+        .space,
+        .returnKey,
+        .missionControl,
+        .showDesktop,
+        .spotlight,
+        .playPause,
+        .mute
+    ]
 
     var displayName: String {
         switch self {
         case .passThrough: return "保持原按键"
+        case .tab: return "Tab"
+        case .escape: return "Escape"
+        case .pageUp: return "Page Up"
+        case .pageDown: return "Page Down"
+        case .space: return "Space / 空格"
+        case .returnKey: return "Return / Enter（可能确认或发送）"
+        case .missionControl: return "Mission Control"
+        case .showDesktop: return "显示桌面"
+        case .spotlight: return "Spotlight"
+        case .playPause: return "播放 / 暂停"
+        case .mute: return "静音"
         case .delete: return "删除键"
         case .fnModifier: return "Fn 修饰键"
-        case .showDesktop: return "显示桌面"
         case .activateCodex: return "Codex 前台并聚焦输入框"
-        case .spotlight: return "Spotlight"
         case .power: return "Power 原功能（系统事件重放）"
         case .logOnly: return "仅记录日志"
         }
@@ -54,6 +86,10 @@ struct KeyMapping: Codable, Equatable {
 
     var technicalDescription: String {
         "\(sourceCodeName) · \(usage)"
+    }
+
+    var recentKeyDescription: String {
+        "\(keyName)（\(sourceCodeName)）→ \(action.displayName)"
     }
 }
 

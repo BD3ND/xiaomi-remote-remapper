@@ -30,6 +30,67 @@ func runSelfTests() -> Int32 {
         where AppConfiguration.defaultMappings.first(where: { $0.usage == usage })?.keyName != name {
         failures.append("default mapping \(usage) should be named \(name)")
     }
+    if AppConfiguration.defaultMappings[3].recentKeyDescription
+        != "菜单键（Application）→ Codex 前台并聚焦输入框" {
+        failures.append("recent key description was not user-facing")
+    }
+    let expectedRemoteActions: [RemoteAction] = [
+        .tab, .escape, .pageUp, .pageDown, .space, .returnKey,
+        .missionControl, .showDesktop, .spotlight, .playPause, .mute
+    ]
+    if RemoteAction.remoteFirstBatch != expectedRemoteActions
+        || !expectedRemoteActions.allSatisfy(RemoteAction.allCases.contains) {
+        failures.append("remote-first action list was incomplete or reordered")
+    }
+    let customShortcutPreferences: [String: Any] = [
+        "36": [
+            "enabled": true,
+            "value": ["parameters": [65_535, 103, CGEventFlags.maskCommand.rawValue]]
+        ]
+    ]
+    let customShowDesktop = SystemShortcutResolver.resolve(
+        .showDesktop,
+        preferences: customShortcutPreferences
+    )
+    if customShowDesktop.keyCode != 103
+        || customShowDesktop.flags != .maskCommand
+        || customShowDesktop.source != "user_configuration"
+        || !customShowDesktop.isEnabled {
+        failures.append("custom show desktop shortcut was not resolved")
+    }
+    let disabledShortcutPreferences: [String: Any] = ["36": ["enabled": false]]
+    let disabledShowDesktop = SystemShortcutResolver.resolve(
+        .showDesktop,
+        preferences: disabledShortcutPreferences
+    )
+    if disabledShowDesktop.source != "user_configuration_disabled"
+        || disabledShowDesktop.isEnabled {
+        failures.append("disabled show desktop shortcut was not marked disabled")
+    }
+    if SystemShortcutResolver.resolve(.missionControl, preferences: nil)
+        != SystemShortcutResolver.Shortcut.missionControl.fallback {
+        failures.append("missing Mission Control shortcut did not use the documented fallback")
+    }
+    let customSpotlightPreferences: [String: Any] = [
+        "64": [
+            "enabled": true,
+            "value": ["parameters": [65_535, 100, CGEventFlags.maskAlternate.rawValue]]
+        ]
+    ]
+    let customSpotlight = SystemShortcutResolver.resolve(
+        .spotlight,
+        preferences: customSpotlightPreferences
+    )
+    if customSpotlight.keyCode != 100
+        || customSpotlight.flags != .maskAlternate
+        || customSpotlight.source != "user_configuration"
+        || !customSpotlight.isEnabled {
+        failures.append("custom Spotlight shortcut was not resolved")
+    }
+    if SystemShortcutResolver.resolve(.spotlight, preferences: nil)
+        != SystemShortcutResolver.Shortcut.spotlight.fallback {
+        failures.append("missing Spotlight shortcut did not use the documented fallback")
+    }
 
     let suppression = SuppressionMappingController.suppressionJSON(for: AppConfiguration.defaultMappings)
     if suppression.contains("0x70000004a") || suppression.contains("0x700000035") {
@@ -93,7 +154,7 @@ func runSelfTests() -> Int32 {
     }
 
     if failures.isEmpty {
-        print("self_test_passed assertions=21")
+        print("self_test_passed assertions=30")
         return 0
     }
     failures.forEach { fputs("self_test_failed \($0)\n", stderr) }
@@ -110,6 +171,9 @@ func runDiagnostics() -> Int32 {
     }
     print("input_monitoring=\(accessName) raw=\(access.rawValue)")
     print("accessibility=\(AXIsProcessTrusted() ? "granted" : "denied")")
+    print("show_desktop_shortcut=\(SystemShortcutResolver.resolve(.showDesktop).diagnosticDescription)")
+    print("mission_control_shortcut=\(SystemShortcutResolver.resolve(.missionControl).diagnosticDescription)")
+    print("spotlight_shortcut=\(SystemShortcutResolver.resolve(.spotlight).diagnosticDescription)")
 
     let store = ConfigurationStore()
     print("bound_serial=\(store.configuration.boundSerial ?? "unbound")")
@@ -167,10 +231,6 @@ func probeHIDOpenPaths() -> Int32 {
 }
 
 func setLoginItem(enabled: Bool) -> Int32 {
-    guard #available(macOS 13.0, *) else {
-        AppLogger.shared.log("login_item unsupported_macos")
-        return 1
-    }
     do {
         if enabled {
             try SMAppService.mainApp.register()

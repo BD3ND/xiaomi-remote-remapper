@@ -1,6 +1,6 @@
 import AppKit
 
-final class MainWindowController: NSWindowController, NSWindowDelegate {
+final class MainWindowController: NSWindowController {
     private let store: ConfigurationStore
     private let requestInputPermission: () -> Void
     private let requestAccessibilityPermission: () -> Void
@@ -58,7 +58,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
-        window.delegate = self
         buildUI()
     }
 

@@ -186,10 +186,10 @@ final class HIDService {
         )
         let integerValue = IOHIDValueGetIntegerValue(value)
         let isDown = integerValue != 0
-        let action = store.configuration.action(for: input)
+        let mapping = store.configuration.mappings.first(where: { $0.usage == input })
+        let action = mapping?.action
         let message = "usage=\(input) action=\(action?.rawValue ?? "unmapped") state=\(isDown ? "down" : "up") value=\(integerValue)"
         AppLogger.shared.log(message)
-        DispatchQueue.main.async { [weak self] in self?.onInput?(message) }
 
         guard let action else { return }
         if isDown {
@@ -199,6 +199,10 @@ final class HIDService {
             }
         } else {
             pressedUsages.remove(input)
+        }
+        if isDown, let mapping {
+            let description = mapping.recentKeyDescription
+            DispatchQueue.main.async { [weak self] in self?.onInput?(description) }
         }
         emitter.emit(action, isDown: isDown)
     }
