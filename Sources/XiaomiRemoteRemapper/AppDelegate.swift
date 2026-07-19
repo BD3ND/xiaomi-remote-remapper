@@ -36,6 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionTimer: Timer?
     private var previousInputAccess: IOHIDAccessType?
     private var lastKeyMessage: String?
+    private var wakeRecoveryWorkItem: DispatchWorkItem?
+    private var wakeRecoveryPending = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -74,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        wakeRecoveryWorkItem?.cancel()
         permissionTimer?.invalidate()
         hidService.stop()
         AppLogger.shared.log("application_stopped")
@@ -227,10 +230,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(url)
     }
 
-    @objc private func systemWillSleep() { hidService.stop() }
-    @objc private func systemDidWake() { hidService.start() }
+    @objc private func systemWillSleep() {
+        wakeRecoveryPending = true
+        wakeRecoveryWorkItem?.cancel()
+        wakeRecoveryWorkItem = nil
+        AppLogger.shared.log("system_will_sleep")
+        hidService.stop()
+    }
+
+    @objc private func systemDidWake() {
+        AppLogger.shared.log("system_did_wake recovery=scheduled")
+        scheduleWakeRecovery(reason: "system_wake", delay: 3.0)
+    }
+
     @objc private func sessionBecameActive() {
-        if case .stopped = hidService.state { hidService.start() }
+        if wakeRecoveryPending {
+            AppLogger.shared.log("session_became_active recovery=scheduled")
+            scheduleWakeRecovery(reason: "session_active", delay: 2.0)
+        } else if case .stopped = hidService.state {
+            AppLogger.shared.log("session_became_active recovery=ordinary_start")
+            hidService.start()
+        }
+    }
+
+    private func scheduleWakeRecovery(reason: String, delay: TimeInterval) {
+        wakeRecoveryPending = true
+        wakeRecoveryWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.wakeRecoveryWorkItem = nil
+            self.wakeRecoveryPending = false
+            AppLogger.shared.log("wake_recovery_started reason=\(reason) mode=shared_suppressed")
+            self.hidService.restart(preferSharedSuppressed: true)
+            self.refreshMenu()
+        }
+        wakeRecoveryWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
     @objc private func quit() { NSApp.terminate(nil) }
 }

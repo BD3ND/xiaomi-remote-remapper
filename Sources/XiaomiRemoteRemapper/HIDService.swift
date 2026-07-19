@@ -36,11 +36,16 @@ final class HIDService {
         _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
     }
 
-    func start() {
+    func start(preferSharedSuppressed: Bool = false) {
         guard manager == nil else { return }
         guard inputMonitoringAccess == kIOHIDAccessTypeGranted else {
             state = .failed("需要输入监控权限")
             AppLogger.shared.log("hid_manager_not_started reason=input_monitoring_permission")
+            return
+        }
+
+        if preferSharedSuppressed {
+            guard startSharedSuppressed(exclusiveResult: nil, reason: "wake_recovery") else { return }
             return
         }
 
@@ -143,9 +148,9 @@ final class HIDService {
         manager = nil
     }
 
-    func restart() {
+    func restart(preferSharedSuppressed: Bool = false) {
         stop()
-        start()
+        start(preferSharedSuppressed: preferSharedSuppressed)
     }
 
     private func deviceMatched(_ device: IOHIDDevice) {
