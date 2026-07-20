@@ -170,6 +170,9 @@ open -n /Applications/XiaomiRemoteRemapper.app --args --disable-login-item
 
 该操作会先备份旧 LaunchAgent、旧脚本和 Karabiner 配置，然后停止旧 LaunchAgent，并清空物理遥控器与 Karabiner 虚拟键盘的两层 `UserKeyMapping`。旧标签可在运行时指定，例如 `LEGACY_LAUNCH_AGENT_LABEL=com.local.xiaomi-remote-hidutil ./scripts/migrate-legacy.sh --apply`。脚本不会自动改写 Karabiner JSON；请在 Karabiner-Elements 的 Devices 页面关闭该遥控器的 “Modify events”，使 Karabiner 忽略该设备，再启动本程序。仅停用旧规则不够，因为 Karabiner Core Service 仍可能独占 HID 设备。
 
+![63元](Image/xiaomi-voice-remote-2-pro.jpg)
+![2.8包邮](Image/xiaomi-voice-remote.jpg)
+
 ## 真实设备验收清单
 
 - 返回键短按只产生一次 Delete；长按按系统速度连续删除，松开、断连、睡眠和退出后立即停止。
