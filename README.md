@@ -1,15 +1,15 @@
-# 小米蓝牙遥控器 2 Pro macOS 按键映射
+# 蓝牙遥控器 macOS 原生按键映射
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue.svg)](https://support.apple.com/macos)
 
-这是一个原生 macOS 菜单栏程序，使用 `IOHIDManager` 读取小米蓝牙遥控器 2 Pro，不依赖 Karabiner 解释特殊 usage。
+这是一个原生 macOS 菜单栏程序，使用 `IOHIDManager` 发现经典蓝牙和 BLE HID 遥控器。用户必须在控制面板明确选择当前设备；程序不会自动接管未知设备。
 
-程序提供轻量控制面板：显示连接和权限状态、引导打开 macOS 权限设置、查看当前映射、修改映射、重新连接、打开日志和设置登录启动。完成设置后可关闭窗口，程序继续在菜单栏后台运行。
+程序提供轻量控制面板：显示连接和权限状态、引导打开 macOS 权限设置、查看当前映射、通过按键学习依次添加映射、重新连接、打开日志和设置登录启动。完成设置后可关闭窗口，程序继续在菜单栏后台运行。
 
-存在“保持原按键”的配置时，程序采用共享读取，并由程序自身调用系统 `hidutil`，仅将需要重映射的来源按键映射到 HID Reserved。若所有按键都需要映射，程序会先尝试独占读取；当前 macOS 拒绝键盘型 HID 独占时自动降级为共享读取。退出程序时会清空程序设置的抑制映射；旧 LaunchAgent 和 Karabiner 规则不再参与运行。
+程序采用共享读取，并由程序自身调用系统 `hidutil`，按照所选设备的 `PhysicalDeviceUniqueID`，仅将已配置且需要重映射的来源按键映射到 HID Reserved。未选择的蓝牙 HID 设备不会被拦截、记录或映射。退出程序时会清空程序设置的抑制映射。
 
-## 默认映射
+## 小米遥控器默认模板
 
 | 遥控器输入 | HID usage | 输出动作 |
 | --- | ---: | --- |
@@ -22,20 +22,29 @@
 
 返回键短按产生一次 Delete；按住超过 macOS 的按键重复延迟后，会按系统当前重复速度连续删除，松开、断连、睡眠或退出时立即停止。
 
-“配置按键…”中的第一批遥控器向动作包括：Tab、Escape、Page Up、Page Down、Space、Return、Mission Control、显示桌面、Spotlight、播放/暂停和静音。Return 可能确认当前操作或发送输入内容，因此在列表中带有风险提示。新增动作不会自动改写默认映射。
+经过识别的小米语音遥控器会自动使用上表模板。其他蓝牙 HID 遥控器从空配置开始，不会套用小米键位。“配置按键…”中的动作包括 Tab、Escape、Page Up、Page Down、Space、Return、Mission Control、显示桌面、Spotlight、播放/暂停、静音、Delete、Fn 和 Codex 等。Return 可能确认当前操作或发送内容，因此列表中带有风险提示。
+
+## 自助配置按键
+
+在控制面板选择遥控器，打开“配置按键…”，点击“开始识别按键”，然后依次按下遥控器按键。配置页会新增或定位对应 HID usage；可以直接修改键名（例如“返回键”）、选择功能或删除映射。重复按同一键不会产生重复项目。
+
+识别期间，程序只记录当前遥控器输入，不执行已知按键的原功能或已有映射；停止识别或关闭配置页后立即恢复。首次发现的未知按键默认设为“仅记录日志”，避免尚未选择功能时产生意外操作。
+
+每只遥控器都有独立的本机配置档案，包含设备名称、设备唯一标识和完整映射。切换遥控器时自动恢复上次配置；这些数据保存在 `~/Library/Application Support/XiaomiRemoteRemapper/config.json`，不会写入遥控器或上传网络。公开 Issue 或日志时仍应删除设备唯一标识。
 
 “显示桌面”、Mission Control 和 Spotlight 会在每次触发时读取 macOS 当前系统快捷键并发送完整组合键；用户只需按对应遥控器按键，无需同时操作 Mac 键盘。若系统没有保存有效的自定义配置，则分别回退到 Apple 默认的 `Fn-H`、`Control-↑` 与 `Command-Space`。如果用户在系统设置中明确禁用了对应快捷键，程序不会绕过该设置强行触发，并会在日志中记录跳过原因。
 
-Power 需要特别说明：设备被独占后，原始 HID 报告不会再进入系统，因此这里是 `NX_SYSDEFINED/NX_POWER_KEY` 重放，并非字节级透传。请先验证短按行为，不要直接连续或长按 Power。
+Power 需要特别说明：原始 HID 报告被设备精确抑制后不会再进入系统，因此这里是 `NX_SYSDEFINED/NX_POWER_KEY` 重放，并非字节级透传。请先验证短按行为，不要直接连续或长按 Power。
 
 ## 支持范围
 
 - 最低系统：macOS 13。
-- 已验证设备：小米蓝牙遥控器 2 Pro，VID `10007` / PID `12984`，键盘接口 usage page `1` / usage `6`。
+- 通用发现范围：IOHID 中 Transport 为经典蓝牙、`Bluetooth Low Energy` 或 `BluetoothLowEnergy`，并提供 `PhysicalDeviceUniqueID` 的 HID 设备。
+- 已完成真实按键验证：系统产品名为“小米蓝牙语音遥控器”和“小米蓝牙语音遥控器2.8”的型号，VID `10007` / PID `12984`。
 - 使用前必须先在 macOS“系统设置 → 蓝牙”中完成配对；程序不负责蓝牙扫描或配对。
-- 首次连接会绑定所发现遥控器的序列号，后续使用 VID、PID 和序列号共同匹配；可以在映射窗口中解除绑定。
-- 不同型号、地区版本、固件或 HID usage 可能需要新增设备匹配和映射，不能保证直接兼容。
-- Karabiner、其他 HID 映射程序和旧 `hidutil UserKeyMapping` 可能造成抢占、双触发或无响应。
+- 同时连接多个蓝牙 HID 设备时，可在控制面板明确选择遥控器；不要选择日常使用的键盘或鼠标。
+- 不同型号可能使用键盘页、Consumer 页或其他 HID usage；可通过学习模式扩展。缺少稳定 `PhysicalDeviceUniqueID` 的设备暂不列入可选范围。
+- Karabiner、其他 HID 映射程序和旧 `hidutil UserKeyMapping` 可能造成抢占、双触发或无响应。仅关闭 Karabiner 规则并不一定会释放设备；还需在 Karabiner-Elements 的 Devices 页面关闭遥控器的 “Modify events”，使 Karabiner 忽略该设备。
 - Codex 聚焦功能依赖 `com.openai.codex` 当前版本的原生 Escape 聚焦行为；程序不会移动鼠标或点击屏幕坐标。Codex 界面行为更新后可能需要调整。
 
 ## 安装
@@ -61,7 +70,7 @@ macOS 对应的双击应用是 `.app`，推荐分发形式是 `.dmg`：
 open dist/XiaomiRemoteRemapper.dmg
 ```
 
-`check.sh` 会执行 debug/release 编译、30 项内置自检、App bundle 打包、签名、DMG 打包和镜像校验。生成物为：
+`check.sh` 会执行 debug/release 编译、51 项内置自检、App bundle 打包、签名、DMG 打包和镜像校验。生成物为：
 
 - `dist/XiaomiRemoteRemapper.app`
 - `dist/XiaomiRemoteRemapper.dmg`
@@ -100,7 +109,7 @@ NOTARY_PROFILE="notary-profile" \
 
 `NOTARY_PROFILE` 应由维护者预先使用 `xcrun notarytool store-credentials` 保存在本机钥匙串，不能提交到仓库。脚本会提交 DMG、公证并装订票据；未提供该变量时只创建本地 DMG，不执行联网公证。上传 Release 前应在一台未安装过本程序的 Mac 上验证 Gatekeeper、权限引导、蓝牙首次绑定和登录启动。
 
-可用应用本身的身份检查当前权限与序列号绑定：
+可用应用本身的身份检查当前权限与设备选择：
 
 ```bash
 dist/XiaomiRemoteRemapper.app/Contents/MacOS/XiaomiRemoteRemapper --diagnostics
@@ -131,8 +140,8 @@ open -n /Applications/XiaomiRemoteRemapper.app --args --disable-login-item
 
 1. 控制面板会显示“输入监控”和“辅助功能”的实时状态。
 2. 点“请求权限”；如 macOS 没有自动进入对应页面，再点“打开系统设置”。
-3. 点“配置按键…”可查看、修改或恢复默认映射，修改后立即保存并安全重连。
-4. 第一次连接 VID `10007` / PID `12984` 的键盘接口时，程序保存设备序列号；之后 VID、PID、序列号共同参与匹配。
+3. 在“使用遥控器”中明确选择目标蓝牙 HID 设备，不要选择日常键盘或鼠标。
+4. 点“配置按键…”后开始识别，可修改键名、动作或删除映射；修改后立即保存并安全重连。
 5. 权限或登录启动状态变化后，如状态未立即刷新，可点“重新连接”。
 
 配置保存在 `~/Library/Application Support/XiaomiRemoteRemapper/config.json`，日志保存在 `~/Library/Logs/XiaomiRemoteRemapper/app.log`。未配置的 usage 会完整记录在日志中。
@@ -140,9 +149,9 @@ open -n /Applications/XiaomiRemoteRemapper.app --args --disable-login-item
 ## 隐私
 
 - 程序没有网络请求、遥测、账户系统或云端存储。
-- `IOHIDManager` 只匹配上述 VID/PID 的遥控器键盘接口，不监听所有键盘设备。
+- `IOHIDManager` 会发现蓝牙 HID 设备，但输入回调会先按 `PhysicalDeviceUniqueID` 过滤；未选择设备的输入不会记录或映射。用户不应选择日常键盘或鼠标。
 - 配置和日志仅保存在当前用户的 Mac 上。
-- 日志可能包含 HID usage、设备产品名和设备序列号。提交 Issue 或日志前，请先删除序列号、用户名、本机路径和其他识别信息。
+- 日志可能包含 HID usage、设备产品名和设备唯一标识。提交 Issue 或日志前，请先删除设备标识、用户名、本机路径和其他识别信息。
 - 本项目不需要完全磁盘访问权限。
 
 ## 从 Karabiner / hidutil 迁移
@@ -153,13 +162,13 @@ open -n /Applications/XiaomiRemoteRemapper.app --args --disable-login-item
 ./scripts/migrate-legacy.sh --check
 ```
 
-准备开始独占设备测试时再执行：
+准备开始原生程序测试时再执行：
 
 ```bash
 ./scripts/migrate-legacy.sh --apply
 ```
 
-该操作会先备份旧 LaunchAgent、旧脚本和 Karabiner 配置，然后停止旧 LaunchAgent，并清空物理遥控器与 Karabiner 虚拟键盘的两层 `UserKeyMapping`。旧标签可在运行时指定，例如 `LEGACY_LAUNCH_AGENT_LABEL=com.local.xiaomi-remote-hidutil ./scripts/migrate-legacy.sh --apply`。脚本不会自动改写 Karabiner JSON；请在 Karabiner-Elements 的 Devices 页面关闭该遥控器的 “Modify events”，再启动本程序。
+该操作会先备份旧 LaunchAgent、旧脚本和 Karabiner 配置，然后停止旧 LaunchAgent，并清空物理遥控器与 Karabiner 虚拟键盘的两层 `UserKeyMapping`。旧标签可在运行时指定，例如 `LEGACY_LAUNCH_AGENT_LABEL=com.local.xiaomi-remote-hidutil ./scripts/migrate-legacy.sh --apply`。脚本不会自动改写 Karabiner JSON；请在 Karabiner-Elements 的 Devices 页面关闭该遥控器的 “Modify events”，使 Karabiner 忽略该设备，再启动本程序。仅停用旧规则不够，因为 Karabiner Core Service 仍可能独占 HID 设备。
 
 ## 真实设备验收清单
 
@@ -167,7 +176,7 @@ open -n /Applications/XiaomiRemoteRemapper.app --args --disable-login-item
 - F5 按住时，能与 MacBook 内置键盘的按键形成 Fn 组合；松开或蓝牙断开后不残留 Fn 状态。
 - Home 和反引号不进入抑制映射，保持系统收到的原始行为。
 - Application 唤起已安装的 `com.openai.codex`，并调用 Codex 原生 Escape 聚焦行为；不移动鼠标、不依赖输入框位置。
-- Power 短按行为与未独占前一致；长按、重复 HID down 报告不会被重复重放。
+- Power 短按行为与原始系统行为一致；长按、重复 HID down 报告不会被重复重放。
 - 蓝牙断开和重连后自动恢复，不需要退出程序。
 - 睡眠/唤醒、锁屏、解锁、快速切换用户后，连接状态与权限状态正确；唤醒后会等待蓝牙恢复，并使用共享读取模式重新连接。
 - 遥控器原始输入和映射输出没有双触发。
@@ -185,7 +194,7 @@ open -n /Applications/XiaomiRemoteRemapper.app --args --disable-login-item
    rm -rf "$HOME/Library/Logs/XiaomiRemoteRemapper"
    ```
 
-4. 如果程序未正常退出，可手动清空该遥控器的抑制映射：
+4. 如果程序未正常退出，小米遥控器的旧版广域映射可用下列命令清空；其他设备应按其 `PhysicalDeviceUniqueID` 精确清空：
 
    ```bash
    hidutil property --matching '{"VendorID":10007,"ProductID":12984}' --set '{"UserKeyMapping":[]}'
@@ -206,4 +215,4 @@ open -n /Applications/XiaomiRemoteRemapper.app --args --disable-login-item
 
 本项目采用 [MIT License](LICENSE)，Copyright (c) 2026 BD3ND。
 
-本项目为社区非官方项目，与小米、Apple 和 OpenAI 无隶属、合作或背书关系。“小米”“macOS”“Codex”及其他相关商标归各自权利人所有。
+本项目为社区非官方项目，与小米、Apple、OpenAI 或其他设备厂商无隶属、合作或背书关系。相关商标归各自权利人所有。

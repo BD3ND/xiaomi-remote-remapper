@@ -39,5 +39,5 @@ karabiner_config="$HOME/.config/karabiner/karabiner.json"
 
 echo "旧 LaunchAgent 已停止，两层 UserKeyMapping 已清空。"
 echo "备份目录：$backup_dir"
-echo "还需在 Karabiner-Elements → Devices 中关闭该遥控器的 Modify events。"
+echo "还需在 Karabiner-Elements → Devices 中关闭该遥控器的 Modify events，使 Karabiner 忽略该设备；仅停用旧规则不够。"
 echo "确认后启动：open '$repository_dir/dist/XiaomiRemoteRemapper.app'"

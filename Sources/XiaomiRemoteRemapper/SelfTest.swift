@@ -91,6 +91,13 @@ func runSelfTests() -> Int32 {
         != SystemShortcutResolver.Shortcut.spotlight.fallback {
         failures.append("missing Spotlight shortcut did not use the documented fallback")
     }
+    if ConnectionState.waiting(selectedDeviceName: "测试遥控器").displayName
+        != "已选择：测试遥控器（当前离线，等待自动重连）" {
+        failures.append("offline selected device state did not preserve user selection")
+    }
+    if ConnectionState.waiting(selectedDeviceName: nil).displayName != "尚未选择遥控器" {
+        failures.append("unselected waiting state was not distinguishable from an offline selection")
+    }
 
     let suppression = SuppressionMappingController.suppressionJSON(for: AppConfiguration.defaultMappings)
     if suppression.contains("0x70000004a") || suppression.contains("0x700000035") {
@@ -98,6 +105,22 @@ func runSelfTests() -> Int32 {
     }
     if !suppression.contains("0x700000065") {
         failures.append("Application key was missing from suppression mapping")
+    }
+    let preciseMatching = SuppressionMappingController.matchingJSON(deviceID: "test-device-id")
+    if !preciseMatching.contains("PhysicalDeviceUniqueID")
+        || !preciseMatching.contains("test-device-id")
+        || preciseMatching.contains("VendorID") {
+        failures.append("suppression matching was not device-specific")
+    }
+    if HIDUsage(page: 7, usage: UInt32.max).isLearnable
+        || HIDUsage(page: 7, usage: 0).isLearnable
+        || !HIDUsage(page: 7, usage: 241).isLearnable {
+        failures.append("HID learning filter accepted an array placeholder or rejected a key")
+    }
+    if HIDUsage.decodedArrayUsage(page: 7, value: 241) != HIDUsage(page: 7, usage: 241)
+        || HIDUsage.decodedArrayUsage(page: 7, value: -15) != nil
+        || HIDUsage.decodedArrayUsage(page: 7, value: 0) != nil {
+        failures.append("keyboard array value was not safely decoded into a usage")
     }
 
     let directory = FileManager.default.temporaryDirectory
@@ -108,22 +131,98 @@ func runSelfTests() -> Int32 {
     do {
         let store = ConfigurationStore(fileURL: url)
         try store.bindSerial("test-serial")
+        let selectedDevice = RemoteDeviceDescriptor(
+            id: "test-physical-device-id",
+            name: "小米语音遥控器",
+            serial: "test-serial",
+            vendorID: HIDService.vendorID,
+            productID: HIDService.productID
+        )
+        try store.selectDevice(selectedDevice)
         try store.setAction(.logOnly, for: HIDUsage(page: 7, usage: 241))
+        let learnedUsage = HIDUsage(page: 12, usage: 34)
+        let learnedFirstTime = try store.learnUsage(learnedUsage)
+        let learnedSecondTime = try store.learnUsage(learnedUsage)
+        if !learnedFirstTime || learnedSecondTime {
+            failures.append("learned usage was not added exactly once")
+        }
+
+        let secondDevice = RemoteDeviceDescriptor(
+            id: "second-physical-device-id",
+            name: "小米语音遥控器 2",
+            serial: nil,
+            vendorID: HIDService.vendorID,
+            productID: HIDService.productID
+        )
+        try store.selectDevice(secondDevice)
+        if store.mappings.first(where: { $0.usage == HIDUsage(page: 7, usage: 241) })?.action != .delete
+            || store.mappings.contains(where: { $0.usage == learnedUsage }) {
+            failures.append("new device did not receive an independent default profile")
+        }
+        try store.setAction(.escape, for: HIDUsage(page: 7, usage: 241))
+        try store.selectDevice(selectedDevice)
+        if store.mappings.first(where: { $0.usage == HIDUsage(page: 7, usage: 241) })?.action != .logOnly
+            || !store.mappings.contains(where: { $0.usage == learnedUsage }) {
+            failures.append("switching devices did not restore the saved profile")
+        }
 
         let reloaded = ConfigurationStore(fileURL: url)
         if reloaded.configuration.boundSerial != "test-serial" {
             failures.append("serial was not persisted")
         }
-        if reloaded.configuration.action(for: HIDUsage(page: 7, usage: 241)) != .logOnly {
-            failures.append("mapping edit was not persisted")
+        if reloaded.configuration.selectedDeviceID != selectedDevice.id
+            || reloaded.configuration.selectedDeviceName != selectedDevice.name {
+            failures.append("selected device was not persisted")
+        }
+        if reloaded.mappings.first(where: { $0.usage == HIDUsage(page: 7, usage: 241) })?.action != .logOnly
+            || reloaded.configuration.deviceProfiles?.count != 2 {
+            failures.append("device profiles were not persisted")
         }
 
         try reloaded.restoreDefaults()
         if reloaded.configuration.boundSerial != "test-serial" {
             failures.append("restoring mappings cleared serial binding")
         }
-        if reloaded.configuration.action(for: HIDUsage(page: 7, usage: 241)) != .delete {
+        if reloaded.configuration.selectedDeviceID != selectedDevice.id {
+            failures.append("restoring mappings cleared selected device")
+        }
+        if reloaded.mappings.first(where: { $0.usage == HIDUsage(page: 7, usage: 241) })?.action != .delete
+            || reloaded.mappings.contains(where: { $0.usage == learnedUsage }) {
             failures.append("default mapping was not restored")
+        }
+        try reloaded.selectDevice(secondDevice)
+        if reloaded.mappings.first(where: { $0.usage == HIDUsage(page: 7, usage: 241) })?.action != .escape {
+            failures.append("restoring one device changed another device profile")
+        }
+
+        let genericDevice = RemoteDeviceDescriptor(
+            id: "generic-bluetooth-remote-id",
+            name: "通用蓝牙遥控器",
+            serial: "generic-serial",
+            vendorID: 1234,
+            productID: 5678,
+            transport: "Bluetooth Low Energy"
+        )
+        try reloaded.selectDevice(genericDevice)
+        if !reloaded.mappings.isEmpty {
+            failures.append("unknown Bluetooth device did not start with an empty profile")
+        }
+        let genericUsage = HIDUsage(page: 12, usage: 205)
+        if try !reloaded.learnUsage(genericUsage)
+            || reloaded.mappings.first?.keyName != "按键 1" {
+            failures.append("generic Bluetooth key was not learned with a neutral name")
+        }
+        try reloaded.renameMapping(for: genericUsage, to: "返回键")
+        if reloaded.mappings.first?.keyName != "返回键" {
+            failures.append("custom key name was not persisted")
+        }
+        try reloaded.deleteMapping(for: genericUsage)
+        if !reloaded.mappings.isEmpty {
+            failures.append("custom mapping was not deleted")
+        }
+        try reloaded.restoreDefaults()
+        if !reloaded.mappings.isEmpty {
+            failures.append("generic device restore unexpectedly installed Xiaomi defaults")
         }
 
         let migrationURL = directory.appendingPathComponent("legacy-config.json")
@@ -146,15 +245,19 @@ func runSelfTests() -> Int32 {
         if migrated.configuration.mappings.map(\.keyName) != AppConfiguration.defaultMappings.map(\.keyName) {
             failures.append("legacy key names were not migrated to remote button names")
         }
-        if migrated.configuration.action(for: HIDUsage(page: 7, usage: 101)) != .logOnly {
+        if migrated.mappings.first(where: { $0.usage == HIDUsage(page: 7, usage: 101) })?.action != .logOnly {
             failures.append("key name migration changed a customized action")
+        }
+        if migrated.configuration.boundSerial != "legacy-serial"
+            || migrated.configuration.selectedDeviceID != nil {
+            failures.append("legacy serial migration did not preserve device discovery state")
         }
     } catch {
         failures.append("configuration persistence threw: \(error)")
     }
 
     if failures.isEmpty {
-        print("self_test_passed assertions=30")
+        print("self_test_passed assertions=51")
         return 0
     }
     failures.forEach { fputs("self_test_failed \($0)\n", stderr) }
@@ -177,6 +280,9 @@ func runDiagnostics() -> Int32 {
 
     let store = ConfigurationStore()
     print("bound_serial=\(store.configuration.boundSerial ?? "unbound")")
+    print("selected_device_id=\(store.configuration.selectedDeviceID ?? "unbound")")
+    print("selected_device_name=\(store.configuration.selectedDeviceName ?? "unknown")")
+    print("saved_device_profiles=\(store.configuration.deviceProfiles?.count ?? 0)")
     print("executable=\(CommandLine.arguments[0])")
     return 0
 }

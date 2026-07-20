@@ -137,8 +137,8 @@ final class EventEmitter {
         postShortcut(keyCode: resolution.keyCode, flags: resolution.flags)
     }
 
-    // IOHID 独占后系统收不到遥控器的 Power 报告。这里重放 macOS 的
-    // NX_SYSDEFINED/NX_POWER_KEY 事件，不声称是字节级硬件透传。
+    // 原始 Power 报告被设备精确抑制后，系统不会再收到它。这里重放
+    // macOS 的 NX_SYSDEFINED/NX_POWER_KEY，不声称是字节级硬件透传。
     private func postSystemDefined(keyType: Int, isDown: Bool) {
         let keyState = isDown ? 0x0A00 : 0x0B00
         guard let event = NSEvent.otherEvent(

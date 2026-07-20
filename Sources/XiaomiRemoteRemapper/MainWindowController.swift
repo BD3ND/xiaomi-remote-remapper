@@ -10,6 +10,7 @@ final class MainWindowController: NSWindowController {
     private let reconnect: () -> Void
     private let openLog: () -> Void
     private let setLoginItem: (Bool) -> Void
+    private let selectDevice: (RemoteDeviceDescriptor) -> Void
     private let completeOnboarding: () -> Void
 
     private let statusIcon = NSImageView()
@@ -21,6 +22,9 @@ final class MainWindowController: NSWindowController {
     private let mappingStack = NSStackView()
     private let lastKeyLabel = NSTextField(wrappingLabelWithString: "最近按键：暂无")
     private let loginCheckbox = NSButton(checkboxWithTitle: "登录时自动启动", target: nil, action: nil)
+    private let devicePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var displayedDevices: [RemoteDeviceDescriptor?] = []
+    private var displayedDeviceSignature: [String] = []
     private var inputRequestButton: NSButton!
     private var accessibilityRequestButton: NSButton!
 
@@ -34,6 +38,7 @@ final class MainWindowController: NSWindowController {
         reconnect: @escaping () -> Void,
         openLog: @escaping () -> Void,
         setLoginItem: @escaping (Bool) -> Void,
+        selectDevice: @escaping (RemoteDeviceDescriptor) -> Void,
         completeOnboarding: @escaping () -> Void
     ) {
         self.store = store
@@ -45,16 +50,17 @@ final class MainWindowController: NSWindowController {
         self.reconnect = reconnect
         self.openLog = openLog
         self.setLoginItem = setLoginItem
+        self.selectDevice = selectDevice
         self.completeOnboarding = completeOnboarding
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 640),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "小米遥控器"
-        window.minSize = NSSize(width: 660, height: 620)
+        window.title = "蓝牙遥控器"
+        window.minSize = NSSize(width: 650, height: 610)
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
@@ -69,7 +75,9 @@ final class MainWindowController: NSWindowController {
         inputGranted: Bool,
         accessibilityGranted: Bool,
         loginEnabled: Bool,
-        lastKey: String?
+        lastKey: String?,
+        availableDevices: [RemoteDeviceDescriptor],
+        selectedDeviceID: String?
     ) {
         connectionLabel.stringValue = connection.displayName
         let connected: Bool
@@ -99,6 +107,7 @@ final class MainWindowController: NSWindowController {
         accessibilityRequestButton.isEnabled = !accessibilityGranted
         loginCheckbox.state = loginEnabled ? .on : .off
         lastKeyLabel.stringValue = "最近按键：\(lastKey ?? "暂无")"
+        refreshDevicePopup(devices: availableDevices, selectedDeviceID: selectedDeviceID)
         rebuildMappings()
     }
 
@@ -113,21 +122,35 @@ final class MainWindowController: NSWindowController {
         contentView.wantsLayer = true
         contentView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
-        let title = NSTextField(labelWithString: "小米蓝牙遥控器 2 Pro")
-        title.font = .systemFont(ofSize: 24, weight: .semibold)
-        let subtitle = NSTextField(labelWithString: "轻量原生映射 · 后台菜单栏运行")
-        subtitle.textColor = .secondaryLabelColor
-        let heading = NSStackView(views: [title, subtitle, connectionLabel])
+        let title = NSTextField(labelWithString: "蓝牙遥控器按键映射")
+        title.font = .systemFont(ofSize: 20, weight: .semibold)
+        connectionLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        connectionLabel.lineBreakMode = .byTruncatingTail
+        connectionLabel.textColor = .secondaryLabelColor
+        let heading = NSStackView(views: [title, connectionLabel])
         heading.orientation = .vertical
         heading.alignment = .leading
         heading.spacing = 4
 
-        statusIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 34, weight: .medium)
+        statusIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 28, weight: .medium)
         statusIcon.setContentHuggingPriority(.required, for: .horizontal)
         let header = NSStackView(views: [statusIcon, heading])
         header.orientation = .horizontal
         header.alignment = .centerY
-        header.spacing = 14
+        header.spacing = 12
+
+        let deviceTitle = NSTextField(labelWithString: "选择遥控器")
+        deviceTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+        deviceTitle.widthAnchor.constraint(equalToConstant: 90).isActive = true
+        devicePopup.target = self
+        devicePopup.action = #selector(deviceSelectionChanged)
+        devicePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 330).isActive = true
+        let deviceSpacer = NSView()
+        deviceSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let deviceRow = NSStackView(views: [deviceTitle, devicePopup, deviceSpacer])
+        deviceRow.orientation = .horizontal
+        deviceRow.alignment = .centerY
+        deviceRow.spacing = 12
 
         let inputCard = permissionCard(
             symbol: "keyboard",
@@ -150,6 +173,8 @@ final class MainWindowController: NSWindowController {
         mappingTitle.font = .systemFont(ofSize: 16, weight: .semibold)
         let editMappings = NSButton(title: "配置按键…", target: self, action: #selector(editMappings))
         editMappings.bezelStyle = .rounded
+        editMappings.keyEquivalent = ","
+        editMappings.keyEquivalentModifierMask = [.command]
         let mappingHeaderSpacer = NSView()
         mappingHeaderSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let mappingHeader = NSStackView(views: [mappingTitle, mappingHeaderSpacer, editMappings])
@@ -158,14 +183,14 @@ final class MainWindowController: NSWindowController {
 
         mappingStack.orientation = .vertical
         mappingStack.alignment = .leading
-        mappingStack.spacing = 6
+        mappingStack.spacing = 5
         let mappingBox = NSBox()
         mappingBox.boxType = .custom
         mappingBox.borderWidth = 1
         mappingBox.cornerRadius = 10
         mappingBox.borderColor = .separatorColor
         mappingBox.fillColor = .clear
-        mappingBox.contentViewMargins = NSSize(width: 14, height: 12)
+        mappingBox.contentViewMargins = NSSize(width: 12, height: 10)
         mappingBox.contentView = mappingStack
 
         lastKeyLabel.textColor = .secondaryLabelColor
@@ -183,23 +208,31 @@ final class MainWindowController: NSWindowController {
         utilities.alignment = .centerY
         utilities.spacing = 10
 
-        let footerNote = NSTextField(wrappingLabelWithString: "设置完成后可关闭窗口，程序会继续在菜单栏后台运行。权限由 macOS 管理，本程序不会读取键盘输入内容。")
+        let footerNote = NSTextField(wrappingLabelWithString: "只选择要映射的遥控器，不要选择日常键盘或鼠标。关闭窗口后程序继续在菜单栏运行。")
         footerNote.textColor = .secondaryLabelColor
         footerNote.font = .systemFont(ofSize: 11)
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "未知"
+        let versionLabel = NSTextField(labelWithString: "版本 \(version)")
+        versionLabel.textColor = .tertiaryLabelColor
+        versionLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        versionLabel.setContentHuggingPriority(.required, for: .horizontal)
         let finishButton = NSButton(title: "完成设置并在后台运行", target: self, action: #selector(finishSetup))
         finishButton.keyEquivalent = "\r"
         finishButton.bezelStyle = .rounded
         let footerSpacer = NSView()
         footerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let footerActions = NSStackView(views: [footerNote, footerSpacer, finishButton])
+        let footerActions = NSStackView(views: [footerNote, footerSpacer, versionLabel, finishButton])
         footerActions.orientation = .horizontal
         footerActions.alignment = .centerY
         footerActions.spacing = 12
-        footerNote.widthAnchor.constraint(lessThanOrEqualToConstant: 430).isActive = true
+        footerNote.widthAnchor.constraint(lessThanOrEqualToConstant: 350).isActive = true
 
         let root = NSStackView(views: [
             header,
             separator(),
+            deviceRow,
             inputCard,
             accessibilityCard,
             mappingHeader,
@@ -211,16 +244,17 @@ final class MainWindowController: NSWindowController {
         ])
         root.orientation = .vertical
         root.alignment = .leading
-        root.spacing = 13
+        root.spacing = 10
         root.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(root)
 
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
-            root.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
-            root.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 22),
-            root.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -20),
+            root.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            root.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            root.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 18),
+            root.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -16),
             header.widthAnchor.constraint(equalTo: root.widthAnchor),
+            deviceRow.widthAnchor.constraint(equalTo: root.widthAnchor),
             inputCard.widthAnchor.constraint(equalTo: root.widthAnchor),
             accessibilityCard.widthAnchor.constraint(equalTo: root.widthAnchor),
             mappingHeader.widthAnchor.constraint(equalTo: root.widthAnchor),
@@ -232,6 +266,52 @@ final class MainWindowController: NSWindowController {
         rebuildMappings()
     }
 
+    private func refreshDevicePopup(
+        devices: [RemoteDeviceDescriptor],
+        selectedDeviceID: String?
+    ) {
+        var choices: [(title: String, device: RemoteDeviceDescriptor?)] = []
+        let selectedDevice = selectedDeviceID.flatMap { selectedID in
+            devices.first(where: { $0.id == selectedID })
+        }
+        if let selectedDeviceID, selectedDevice == nil {
+            let name = store.configuration.selectedDeviceName ?? "已选择的遥控器"
+            choices.append((
+                title: "\(name) · \(selectedDeviceID.suffix(6))（已选择，当前离线）",
+                device: nil
+            ))
+        }
+        choices.append(contentsOf: devices.map { ($0.selectionLabel, Optional($0)) })
+
+        let signature = choices.map { choice in
+            "\(choice.device?.id ?? "offline")|\(choice.title)"
+        }
+        guard signature != displayedDeviceSignature else { return }
+        displayedDeviceSignature = signature
+        displayedDevices = choices.map(\.device)
+        devicePopup.removeAllItems()
+        guard !choices.isEmpty else {
+            devicePopup.addItem(withTitle: "未检测到支持的遥控器")
+            devicePopup.isEnabled = false
+            return
+        }
+
+        devicePopup.addItems(withTitles: choices.map(\.title))
+        if selectedDeviceID != nil,
+           let index = choices.firstIndex(where: { $0.device?.id == selectedDeviceID || $0.device == nil }) {
+            devicePopup.selectItem(at: index)
+        } else {
+            devicePopup.select(nil)
+        }
+        devicePopup.isEnabled = choices.contains(where: { $0.device != nil })
+    }
+
+    @objc private func deviceSelectionChanged() {
+        guard displayedDevices.indices.contains(devicePopup.indexOfSelectedItem),
+              let device = displayedDevices[devicePopup.indexOfSelectedItem] else { return }
+        selectDevice(device)
+    }
+
     private func permissionCard(
         symbol: String,
         title: String,
@@ -241,12 +321,12 @@ final class MainWindowController: NSWindowController {
         settingsAction: Selector
     ) -> NSView {
         let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: title) ?? NSImage())
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 20, weight: .medium)
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)
         icon.contentTintColor = .controlAccentColor
         icon.widthAnchor.constraint(equalToConstant: 28).isActive = true
 
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         statusLabel.font = .systemFont(ofSize: 12, weight: .medium)
         let titleRow = NSStackView(views: [titleLabel, statusLabel])
         titleRow.orientation = .horizontal
@@ -278,7 +358,7 @@ final class MainWindowController: NSWindowController {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 10
-        row.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
 
         let cardContent = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -298,7 +378,7 @@ final class MainWindowController: NSWindowController {
         box.fillColor = .clear
         box.contentViewMargins = .zero
         box.contentView = cardContent
-        box.heightAnchor.constraint(equalToConstant: 70).isActive = true
+        box.heightAnchor.constraint(equalToConstant: 64).isActive = true
         box.setContentHuggingPriority(.required, for: .vertical)
         box.setContentCompressionResistancePriority(.required, for: .vertical)
         return box
@@ -309,7 +389,13 @@ final class MainWindowController: NSWindowController {
             mappingStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
-        for mapping in store.configuration.mappings {
+        if store.mappings.isEmpty {
+            let empty = NSTextField(labelWithString: "尚未识别按键，请打开“配置按键…”开始学习。")
+            empty.textColor = .secondaryLabelColor
+            mappingStack.addArrangedSubview(empty)
+            return
+        }
+        for mapping in store.mappings {
             let key = NSTextField(labelWithString: mapping.keyName)
             key.font = .systemFont(ofSize: 12, weight: .medium)
             key.widthAnchor.constraint(equalToConstant: 90).isActive = true
@@ -344,7 +430,10 @@ final class MainWindowController: NSWindowController {
     @objc private func requestAccessibility() { requestAccessibilityPermission() }
     @objc private func openInputPrivacySettings() { openInputSettings() }
     @objc private func openAccessibilityPrivacySettings() { openAccessibilitySettings() }
-    @objc private func editMappings() { showMappings() }
+    @objc private func editMappings() {
+        AppLogger.shared.log("settings_button_pressed")
+        showMappings()
+    }
     @objc private func reconnectDevice() { reconnect() }
     @objc private func showLog() { openLog() }
     @objc private func loginItemChanged() { setLoginItem(loginCheckbox.state == .on) }

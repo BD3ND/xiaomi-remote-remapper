@@ -8,10 +8,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = ConfigurationStore()
     private let emitter = EventEmitter()
     private lazy var hidService = HIDService(store: store, emitter: emitter)
-    private lazy var settingsController = SettingsWindowController(store: store) { [weak self] in
-        self?.hidService.restart()
-        self?.refreshMenu()
-    }
+    private lazy var settingsController = SettingsWindowController(
+        store: store,
+        onConfigurationChange: { [weak self] in
+            self?.hidService.restart()
+            self?.refreshMenu()
+        },
+        onLearningChange: { [weak self] enabled in
+            self?.hidService.setLearningMode(enabled)
+        }
+    )
     private lazy var mainController = MainWindowController(
         store: store,
         requestInputPermission: { [weak self] in self?.requestInputPermission() },
@@ -22,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reconnect: { [weak self] in self?.restartHID() },
         openLog: { [weak self] in self?.openLog() },
         setLoginItem: { [weak self] enabled in self?.setLoginItem(enabled) },
+        selectDevice: { [weak self] device in self?.selectDevice(device) },
         completeOnboarding: {
             UserDefaults.standard.set(true, forKey: Self.onboardingCompletedKey)
         }
@@ -50,6 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.lastKeyMessage = message
             self?.refreshMenu()
         }
+        hidService.onRawInput = { [weak self] usage, isDown in
+            self?.settingsController.receiveInput(usage, isDown: isDown)
+        }
+        hidService.onDevicesChange = { [weak self] _ in self?.refreshMenu() }
         hidService.start()
         refreshMenu()
         permissionTimer = Timer.scheduledTimer(
@@ -84,7 +95,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "dot.radiowaves.left.and.right", accessibilityDescription: "小米遥控器")
+        let statusImage = NSImage(
+            systemSymbolName: "dot.radiowaves.left.and.right",
+            accessibilityDescription: "蓝牙遥控器"
+        )
+        statusImage?.isTemplate = true
+        statusItem.button?.image = statusImage
+        statusItem.button?.imagePosition = .imageOnly
+        statusItem.button?.contentTintColor = nil
 
         let menu = NSMenu()
         [connectionItem, inputPermissionItem, accessibilityItem, lastKeyItem].forEach {
@@ -143,7 +161,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             ready = false
         }
-        statusItem.button?.contentTintColor = ready ? .systemGreen : .systemOrange
+        statusItem.button?.contentTintColor = nil
+        statusItem.button?.toolTip = ready
+            ? "蓝牙遥控器按键映射：工作正常"
+            : "蓝牙遥控器按键映射：需要检查连接或权限"
         let loginEnabled = SMAppService.mainApp.status == .enabled
         mainController.refresh(
             connection: hidService.state,
@@ -151,7 +172,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             inputGranted: inputAccess == kIOHIDAccessTypeGranted,
             accessibilityGranted: emitter.accessibilityTrusted,
             loginEnabled: loginEnabled,
-            lastKey: lastKeyMessage
+            lastKey: lastKeyMessage,
+            availableDevices: hidService.availableDevices,
+            selectedDeviceID: store.configuration.selectedDeviceID
         )
     }
 
@@ -187,9 +210,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showSettings() {
-        settingsController.refresh()
-        settingsController.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        AppLogger.shared.log("settings_window_requested")
+        settingsController.present()
     }
 
     @objc private func showMainWindow() {
@@ -221,6 +243,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.presentError(error)
         }
         refreshMenu()
+    }
+
+    private func selectDevice(_ device: RemoteDeviceDescriptor) {
+        guard store.configuration.selectedDeviceID != device.id else { return }
+        do {
+            try store.selectDevice(device)
+            AppLogger.shared.log("device_selected_by_user name=\(device.name) id=\(device.id)")
+            hidService.restart()
+            refreshMenu()
+        } catch {
+            NSApp.presentError(error)
+        }
     }
 
     private func openPrivacyPane(_ anchor: String) {

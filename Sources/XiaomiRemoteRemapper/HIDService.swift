@@ -7,18 +7,21 @@ final class HIDService {
 
     var onStateChange: ((ConnectionState) -> Void)?
     var onInput: ((String) -> Void)?
+    var onRawInput: ((HIDUsage, Bool) -> Void)?
+    var onDevicesChange: (([RemoteDeviceDescriptor]) -> Void)?
+
+    private(set) var availableDevices: [RemoteDeviceDescriptor] = []
 
     private let store: ConfigurationStore
     private let emitter: EventEmitter
     private let suppressionMapping = SuppressionMappingController()
     private var manager: IOHIDManager?
     private var connectedDevices: Set<IOHIDDevice> = []
+    private var deviceDescriptors: [IOHIDDevice: RemoteDeviceDescriptor] = [:]
     private var pressedUsages: Set<HIDUsage> = []
-    private enum OpenMode: String {
-        case exclusive
-        case sharedSuppressed = "shared_suppressed"
-    }
-    private var openMode: OpenMode = .exclusive
+    private var arrayElementUsages: [IOHIDElement: HIDUsage] = [:]
+    private var suppressedDeviceID: String?
+    private(set) var learningModeEnabled = false
     private(set) var state: ConnectionState = .stopped {
         didSet { DispatchQueue.main.async { [weak self] in self?.onStateChange?(self?.state ?? .stopped) } }
     }
@@ -44,55 +47,42 @@ final class HIDService {
             return
         }
 
-        if preferSharedSuppressed {
-            guard startSharedSuppressed(exclusiveResult: nil, reason: "wake_recovery") else { return }
-            return
-        }
-
-        if store.configuration.mappings.contains(where: { $0.action == .passThrough }) {
-            guard startSharedSuppressed(exclusiveResult: nil, reason: "passthrough_configured") else { return }
-            return
-        }
-
-        openMode = .exclusive
-        let exclusiveResult = openManager(options: IOOptionBits(kIOHIDOptionsTypeSeizeDevice))
-        if exclusiveResult == kIOReturnSuccess {
-            state = .waiting
-            AppLogger.shared.log("hid_manager_started vendor=\(Self.vendorID) product=\(Self.productID) serial=\(store.configuration.boundSerial ?? "unbound") mode=exclusive")
-            return
-        }
-
-        closeManager()
-        guard exclusiveResult == kIOReturnNotPrivileged else {
-            let message = exclusiveResult == kIOReturnExclusiveAccess
-                ? "设备已被其他程序独占"
-                : "IOHIDManagerOpen 返回 \(exclusiveResult)"
-            state = .failed(message)
-            AppLogger.shared.log("hid_manager_open_failed result=\(exclusiveResult) mode=exclusive")
-            return
-        }
-
-        _ = startSharedSuppressed(exclusiveResult: exclusiveResult, reason: "exclusive_not_privileged")
+        let reason = preferSharedSuppressed ? "wake_recovery" : "device_selection"
+        _ = startSharedSuppressed(reason: reason)
     }
 
     @discardableResult
-    private func startSharedSuppressed(exclusiveResult: IOReturn?, reason: String) -> Bool {
-        openMode = .sharedSuppressed
-        guard suppressionMapping.apply(mappings: store.configuration.mappings) else {
-            state = .failed("无法应用原按键抑制映射")
-            return false
+    private func startSharedSuppressed(reason: String) -> Bool {
+        _ = suppressionMapping.clearLegacyBroadMapping()
+        if let selectedDeviceID = store.configuration.selectedDeviceID {
+            guard suppressionMapping.apply(
+                mappings: suppressionMappings,
+                deviceID: selectedDeviceID
+            ) else {
+                state = .failed("无法应用所选遥控器的原按键抑制映射")
+                return false
+            }
+            suppressedDeviceID = selectedDeviceID
         }
         let sharedResult = openManager(options: IOOptionBits(kIOHIDOptionsTypeNone))
         guard sharedResult == kIOReturnSuccess else {
             closeManager()
-            suppressionMapping.clear()
-            state = .failed("共享读取打开失败：\(sharedResult)")
+            if let suppressedDeviceID {
+                suppressionMapping.clear(deviceID: suppressedDeviceID)
+                self.suppressedDeviceID = nil
+            }
+            if sharedResult == kIOReturnExclusiveAccess {
+                state = .failed("蓝牙 HID 被其他映射程序占用，请让 Karabiner 忽略目标设备")
+            } else {
+                state = .failed("共享读取打开失败：\(sharedResult)")
+            }
             AppLogger.shared.log("hid_manager_open_failed result=\(sharedResult) mode=shared_suppressed")
             return false
         }
-        state = .waiting
-        let exclusiveDetail = exclusiveResult.map(String.init) ?? "skipped"
-        AppLogger.shared.log("hid_manager_started vendor=\(Self.vendorID) product=\(Self.productID) serial=\(store.configuration.boundSerial ?? "unbound") mode=shared_suppressed exclusive_result=\(exclusiveDetail) reason=\(reason)")
+        state = .waiting(selectedDeviceName: store.configuration.selectedDeviceName)
+        AppLogger.shared.log(
+            "hid_manager_started scope=bluetooth_hid selected_device=\(store.configuration.selectedDeviceID ?? "unbound") mode=shared_suppressed reason=\(reason)"
+        )
         return true
     }
 
@@ -100,18 +90,13 @@ final class HIDService {
         let newManager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         manager = newManager
 
-        var matching: [String: Any] = [
-            kIOHIDVendorIDKey as String: Self.vendorID,
-            kIOHIDProductIDKey as String: Self.productID,
-            kIOHIDPrimaryUsagePageKey as String: 1,
-            kIOHIDPrimaryUsageKey as String: 6
+        let matching: [[String: Any]] = [
+            [kIOHIDTransportKey as String: kIOHIDTransportBluetoothValue as String],
+            [kIOHIDTransportKey as String: "Bluetooth Low Energy"],
+            [kIOHIDTransportKey as String: kIOHIDTransportBluetoothLowEnergyValue as String]
         ]
-        if let serial = store.configuration.boundSerial, !serial.isEmpty {
-            matching[kIOHIDSerialNumberKey as String] = serial
-        }
-
         let context = Unmanaged.passUnretained(self).toOpaque()
-        IOHIDManagerSetDeviceMatching(newManager, matching as CFDictionary)
+        IOHIDManagerSetDeviceMatchingMultiple(newManager, matching as CFArray)
         IOHIDManagerRegisterDeviceMatchingCallback(newManager, { context, _, _, device in
             guard let context else { return }
             Unmanaged<HIDService>.fromOpaque(context).takeUnretainedValue().deviceMatched(device)
@@ -131,12 +116,16 @@ final class HIDService {
     func stop() {
         emitter.releaseHeldInputs()
         connectedDevices.removeAll()
+        deviceDescriptors.removeAll()
+        availableDevices.removeAll()
+        DispatchQueue.main.async { [weak self] in self?.onDevicesChange?([]) }
         pressedUsages.removeAll()
+        arrayElementUsages.removeAll()
         closeManager()
-        if openMode == .sharedSuppressed {
-            suppressionMapping.clear()
+        if let suppressedDeviceID {
+            suppressionMapping.clear(deviceID: suppressedDeviceID)
+            self.suppressedDeviceID = nil
         }
-        openMode = .exclusive
         state = .stopped
     }
 
@@ -153,45 +142,122 @@ final class HIDService {
         start(preferSharedSuppressed: preferSharedSuppressed)
     }
 
-    private func deviceMatched(_ device: IOHIDDevice) {
-        connectedDevices.insert(device)
-        if openMode == .sharedSuppressed {
-            suppressionMapping.apply(mappings: store.configuration.mappings)
+    func setLearningMode(_ enabled: Bool) {
+        guard learningModeEnabled != enabled else { return }
+        learningModeEnabled = enabled
+        emitter.releaseHeldInputs()
+        pressedUsages.removeAll()
+        arrayElementUsages.removeAll()
+        if let selectedDeviceID = store.configuration.selectedDeviceID,
+           suppressionMapping.apply(mappings: suppressionMappings, deviceID: selectedDeviceID) {
+            suppressedDeviceID = selectedDeviceID
         }
-        let product = property(kIOHIDProductKey, device: device) ?? "小米蓝牙遥控器 2 Pro"
-        let serial = property(kIOHIDSerialNumberKey, device: device)
+        AppLogger.shared.log("mapping_learning_mode enabled=\(enabled)")
+    }
 
-        if store.configuration.boundSerial == nil, let serial, !serial.isEmpty {
+    private var suppressionMappings: [KeyMapping] {
+        guard learningModeEnabled else { return store.mappings }
+        return store.mappings.map {
+            KeyMapping(usage: $0.usage, action: .logOnly, keyName: $0.keyName)
+        }
+    }
+
+    private func deviceMatched(_ device: IOHIDDevice) {
+        guard let descriptor = descriptor(for: device) else {
+            AppLogger.shared.log("device_ignored reason=missing_physical_device_id")
+            return
+        }
+        deviceDescriptors[device] = descriptor
+        publishAvailableDevices()
+
+        if store.configuration.selectedDeviceID == nil {
+            let shouldAutoSelect: Bool
+            if let boundSerial = store.configuration.boundSerial {
+                shouldAutoSelect = boundSerial == descriptor.serial
+            } else {
+                shouldAutoSelect = descriptor.isKnownXiaomiRemote
+            }
+            guard shouldAutoSelect else {
+                AppLogger.shared.log(
+                    "device_available selected=false name=\(descriptor.name) id=\(descriptor.id)"
+                )
+                return
+            }
             do {
-                try store.bindSerial(serial)
-                AppLogger.shared.log("device_serial_bound serial=\(serial)")
+                try store.selectDevice(descriptor)
+                AppLogger.shared.log(
+                    "device_selected_automatically name=\(descriptor.name) id=\(descriptor.id)"
+                )
             } catch {
-                AppLogger.shared.log("device_serial_bind_failed error=\(error)")
+                AppLogger.shared.log("device_selection_save_failed error=\(error)")
             }
         }
 
-        let displayProduct = openMode == .exclusive ? product : "\(product)（共享读取/原键抑制）"
-        state = .connected(product: displayProduct, serial: serial)
-        AppLogger.shared.log("device_connected product=\(product) serial=\(serial ?? "unavailable") mode=\(openMode.rawValue)")
+        guard store.configuration.selectedDeviceID == descriptor.id else {
+            AppLogger.shared.log(
+                "device_available selected=false name=\(descriptor.name) id=\(descriptor.id)"
+            )
+            return
+        }
+
+        connectedDevices.insert(device)
+        if suppressionMapping.apply(mappings: suppressionMappings, deviceID: descriptor.id) {
+            suppressedDeviceID = descriptor.id
+        }
+
+        let displayProduct = "\(descriptor.name)（共享读取/原键抑制）"
+        state = .connected(product: displayProduct, serial: descriptor.serial)
+        AppLogger.shared.log(
+            "device_connected product=\(descriptor.name) id=\(descriptor.id) mode=shared_suppressed"
+        )
     }
 
     private func deviceRemoved(_ device: IOHIDDevice) {
+        let descriptor = deviceDescriptors.removeValue(forKey: device)
+        publishAvailableDevices()
+        guard descriptor?.id == store.configuration.selectedDeviceID else { return }
         connectedDevices.remove(device)
         emitter.releaseHeldInputs()
         pressedUsages.removeAll()
-        state = connectedDevices.isEmpty ? .waiting : state
+        arrayElementUsages.removeAll()
+        state = connectedDevices.isEmpty
+            ? .waiting(selectedDeviceName: store.configuration.selectedDeviceName)
+            : state
         AppLogger.shared.log("device_disconnected remaining=\(connectedDevices.count)")
     }
 
     private func inputReceived(_ value: IOHIDValue) {
         let element = IOHIDValueGetElement(value)
-        let input = HIDUsage(
+        let device = IOHIDElementGetDevice(element)
+        guard let descriptor = deviceDescriptors[device] ?? descriptor(for: device),
+              descriptor.id == store.configuration.selectedDeviceID else { return }
+        let rawInput = HIDUsage(
             page: IOHIDElementGetUsagePage(element),
             usage: IOHIDElementGetUsage(element)
         )
         let integerValue = IOHIDValueGetIntegerValue(value)
-        let isDown = integerValue != 0
-        let mapping = store.configuration.mappings.first(where: { $0.usage == input })
+        let input: HIDUsage
+        let isDown: Bool
+        if rawInput.usage == UInt32.max {
+            if let decoded = HIDUsage.decodedArrayUsage(page: rawInput.page, value: integerValue) {
+                input = decoded
+                isDown = true
+                arrayElementUsages[element] = decoded
+            } else if integerValue == 0, let released = arrayElementUsages.removeValue(forKey: element) {
+                input = released
+                isDown = false
+            } else {
+                return
+            }
+        } else {
+            input = rawInput
+            isDown = integerValue != 0
+        }
+        if input.isLearnable {
+            DispatchQueue.main.async { [weak self] in self?.onRawInput?(input, isDown) }
+        }
+        guard !learningModeEnabled else { return }
+        let mapping = store.mappings.first(where: { $0.usage == input })
         let action = mapping?.action
         let message = "usage=\(input) action=\(action?.rawValue ?? "unmapped") state=\(isDown ? "down" : "up") value=\(integerValue)"
         AppLogger.shared.log(message)
@@ -203,7 +269,10 @@ final class HIDService {
                 return
             }
         } else {
-            pressedUsages.remove(input)
+            guard pressedUsages.remove(input) != nil else {
+                AppLogger.shared.log("duplicate_key_state_ignored usage=\(input) state=up")
+                return
+            }
         }
         if isDown, let mapping {
             let description = mapping.recentKeyDescription
@@ -212,7 +281,43 @@ final class HIDService {
         emitter.emit(action, isDown: isDown)
     }
 
+    private func descriptor(for device: IOHIDDevice) -> RemoteDeviceDescriptor? {
+        guard let id = property("PhysicalDeviceUniqueID", device: device) else { return nil }
+        let transport = property(kIOHIDTransportKey, device: device) ?? "Bluetooth"
+        guard transport.localizedCaseInsensitiveContains("bluetooth") else { return nil }
+        let name = property(kIOHIDProductKey, device: device) ?? "蓝牙 HID 遥控器"
+        let serial = property(kIOHIDSerialNumberKey, device: device)
+        return RemoteDeviceDescriptor(
+            id: id,
+            name: name,
+            serial: serial,
+            vendorID: numberProperty(kIOHIDVendorIDKey, device: device),
+            productID: numberProperty(kIOHIDProductIDKey, device: device),
+            transport: transport
+        )
+    }
+
+    private func publishAvailableDevices() {
+        availableDevices = Array(Set(deviceDescriptors.values.map(\.id)))
+            .compactMap { id in deviceDescriptors.values.first(where: { $0.id == id }) }
+            .sorted { $0.selectionLabel.localizedStandardCompare($1.selectionLabel) == .orderedAscending }
+        let devices = availableDevices
+        DispatchQueue.main.async { [weak self] in self?.onDevicesChange?(devices) }
+    }
+
     private func property(_ key: String, device: IOHIDDevice) -> String? {
-        IOHIDDeviceGetProperty(device, key as CFString) as? String
+        guard let value = IOHIDDeviceGetProperty(device, key as CFString) as? String else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private func numberProperty(_ key: String, device: IOHIDDevice) -> Int {
+        (IOHIDDeviceGetProperty(device, key as CFString) as? NSNumber)?.intValue ?? 0
     }
 }
