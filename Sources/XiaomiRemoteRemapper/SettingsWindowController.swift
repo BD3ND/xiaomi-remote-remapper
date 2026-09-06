@@ -157,7 +157,7 @@ final class SettingsWindowController: NSWindowController {
             nameField.widthAnchor.constraint(equalToConstant: 150).isActive = true
             let technical = NSTextField(labelWithString: mapping.technicalDescription)
             technical.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-            technical.textColor = .tertiaryLabelColor
+            technical.textColor = .secondaryLabelColor
             technical.widthAnchor.constraint(equalToConstant: 115).isActive = true
             let popup = NSPopUpButton(frame: .zero, pullsDown: false)
             popup.addItems(withTitles: RemoteAction.allCases.map(\.displayName))

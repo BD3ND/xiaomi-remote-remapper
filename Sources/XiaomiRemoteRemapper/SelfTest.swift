@@ -225,6 +225,24 @@ func runSelfTests() -> Int32 {
             failures.append("generic device restore unexpectedly installed Xiaomi defaults")
         }
 
+        let c2Device = RemoteDeviceDescriptor(
+            id: "ble-c2:01234567-89ab-cdef-0123-456789abcdef",
+            name: "C2-RC-LITE",
+            serial: "01234567-89AB-CDEF-0123-456789ABCDEF",
+            transport: "Bluetooth Low Energy（C2 私有协议）"
+        )
+        try reloaded.selectDevice(c2Device)
+        let expectedC2Keys = Set([0x50, 0x4F, 0x52, 0x51, 0x28].map {
+            HIDUsage(page: 0xFF00, usage: UInt32($0))
+        })
+        if !c2Device.isC2LiteRemote
+            || Set(reloaded.mappings.map(\.usage)) != expectedC2Keys
+            || reloaded.mappings.first(where: { $0.usage == HIDUsage(page: 0xFF00, usage: 0x52) })?.action != .delete
+            || reloaded.mappings.first(where: { $0.usage == HIDUsage(page: 0xFF00, usage: 0x51) })?.action != .activateCodex
+            || reloaded.mappings.first(where: { $0.usage == HIDUsage(page: 0xFF00, usage: 0x28) })?.action != .fnModifier {
+            failures.append("C2 BLE remote did not receive its default shortcut profile")
+        }
+
         let migrationURL = directory.appendingPathComponent("legacy-config.json")
         var legacyMappings = AppConfiguration.defaultMappings.map {
             KeyMapping(usage: $0.usage, action: $0.action, keyName: $0.sourceCodeName)

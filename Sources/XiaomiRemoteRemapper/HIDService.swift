@@ -54,7 +54,8 @@ final class HIDService {
     @discardableResult
     private func startSharedSuppressed(reason: String) -> Bool {
         _ = suppressionMapping.clearLegacyBroadMapping()
-        if let selectedDeviceID = store.configuration.selectedDeviceID {
+        if let selectedDeviceID = store.configuration.selectedDeviceID,
+           !selectedDeviceID.hasPrefix("ble-") {
             guard suppressionMapping.apply(
                 mappings: suppressionMappings,
                 deviceID: selectedDeviceID
@@ -149,6 +150,7 @@ final class HIDService {
         pressedUsages.removeAll()
         arrayElementUsages.removeAll()
         if let selectedDeviceID = store.configuration.selectedDeviceID,
+           !selectedDeviceID.hasPrefix("ble-"),
            suppressionMapping.apply(mappings: suppressionMappings, deviceID: selectedDeviceID) {
             suppressedDeviceID = selectedDeviceID
         }

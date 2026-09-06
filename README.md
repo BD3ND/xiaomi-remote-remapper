@@ -5,6 +5,8 @@
 
 这是一个原生 macOS 菜单栏程序，使用 `IOHIDManager` 发现经典蓝牙和 BLE HID 遥控器。用户必须在控制面板明确选择当前设备；程序不会自动接管未知设备。
 
+同时支持 Carrobot `C2-RC-LITE`：这是不提供标准 HID 服务的 BLE 私有协议遥控器。程序会直接扫描其服务并订阅按键通知，不需要先在 macOS 蓝牙设置中把它配对成键盘；首次使用时按系统提示允许蓝牙访问即可。对于其他有名称的 BLE GATT 设备，程序同样会显示为候选设备；用户可明确选择后订阅其通知特征并通过学习模式配置按键。未知设备默认仅记录，不会触发系统动作。
+
 程序提供轻量控制面板：显示连接和权限状态、引导打开 macOS 权限设置、查看当前映射、通过按键学习依次添加映射、重新连接、打开日志和设置登录启动。完成设置后可关闭窗口，程序继续在菜单栏后台运行。
 
 程序采用共享读取，并由程序自身调用系统 `hidutil`，按照所选设备的 `PhysicalDeviceUniqueID`，仅将已配置且需要重映射的来源按键映射到 HID Reserved。未选择的蓝牙 HID 设备不会被拦截、记录或映射。退出程序时会清空程序设置的抑制映射。
@@ -40,8 +42,9 @@ Power 需要特别说明：原始 HID 报告被设备精确抑制后不会再进
 
 - 最低系统：macOS 13。
 - 通用发现范围：IOHID 中 Transport 为经典蓝牙、`Bluetooth Low Energy` 或 `BluetoothLowEnergy`，并提供 `PhysicalDeviceUniqueID` 的 HID 设备。
+- `C2-RC-LITE` 使用独立的 BLE GATT 通道：服务 `dba3ffc0-b4ee-3a90-714e-7d0233123998`、按键通知特征 `dba3ffc2-b4ee-3a90-714e-7d0233123998`。内置五个可配置键名：左、右默认“仅记录日志”，返回、菜单、语音分别默认映射为 Delete、Codex 前台聚焦、Fn 锁定。
 - 已完成真实按键验证：系统产品名为“小米蓝牙语音遥控器”和“小米蓝牙语音遥控器2.8”的型号，VID `10007` / PID `12984`。
-- 使用前必须先在 macOS“系统设置 → 蓝牙”中完成配对；程序不负责蓝牙扫描或配对。
+- 标准 HID 遥控器使用前必须先在 macOS“系统设置 → 蓝牙”中完成配对；`C2-RC-LITE` 由应用直接扫描连接，不需要预先配对。
 - 同时连接多个蓝牙 HID 设备时，可在控制面板明确选择遥控器；不要选择日常使用的键盘或鼠标。
 - 不同型号可能使用键盘页、Consumer 页或其他 HID usage；可通过学习模式扩展。缺少稳定 `PhysicalDeviceUniqueID` 的设备暂不列入可选范围。
 - Karabiner、其他 HID 映射程序和旧 `hidutil UserKeyMapping` 可能造成抢占、双触发或无响应。仅关闭 Karabiner 规则并不一定会释放设备；还需在 Karabiner-Elements 的 Devices 页面关闭遥控器的 “Modify events”，使 Karabiner 忽略该设备。

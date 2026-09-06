@@ -48,6 +48,14 @@ struct RemoteDeviceDescriptor: Equatable {
         vendorID == 10_007 && productID == 12_984
     }
 
+    var isC2LiteRemote: Bool {
+        id.hasPrefix("ble-c2:")
+    }
+
+    var isBLEGATTRemote: Bool {
+        id.hasPrefix("ble-c2:") || id.hasPrefix("ble-gatt:")
+    }
+
     var selectionLabel: String {
         let suffix = id.suffix(6)
         return "\(name) · \(suffix)"
@@ -63,6 +71,10 @@ struct RemoteProfile: Codable, Equatable {
 
     var isKnownXiaomiRemote: Bool {
         vendorID == 10_007 && productID == 12_984
+    }
+
+    var isC2LiteRemote: Bool {
+        deviceID.hasPrefix("ble-c2:")
     }
 }
 
@@ -129,6 +141,7 @@ struct KeyMapping: Codable, Equatable {
 
     var sourceCodeName: String {
         switch (usage.page, usage.usage) {
+        case (0xFF00, _): return "BLE"
         case (7, 241): return "特殊键"
         case (7, 62): return "F5"
         case (7, 74): return "Home"
@@ -156,7 +169,7 @@ struct KeyMapping: Codable, Equatable {
 }
 
 struct AppConfiguration: Codable, Equatable {
-    static let currentSchemaVersion = 6
+    static let currentSchemaVersion = 7
 
     var schemaVersion: Int? = currentSchemaVersion
     var boundSerial: String?
@@ -172,6 +185,17 @@ struct AppConfiguration: Codable, Equatable {
         KeyMapping(usage: HIDUsage(page: 7, usage: 101), action: .activateCodex, keyName: "菜单键"),
         KeyMapping(usage: HIDUsage(page: 7, usage: 53), action: .passThrough, keyName: "直播键"),
         KeyMapping(usage: HIDUsage(page: 7, usage: 102), action: .power, keyName: "电源键")
+    ]
+
+    // C2-RC-LITE is a BLE GATT remote rather than a HID keyboard.  Its
+    // notification byte is stored in a vendor page so the existing learning
+    // and per-device mapping UI can treat it just like any other input.
+    static let c2LiteDefaultMappings: [KeyMapping] = [
+        KeyMapping(usage: HIDUsage(page: 0xFF00, usage: 0x50), action: .logOnly, keyName: "左键"),
+        KeyMapping(usage: HIDUsage(page: 0xFF00, usage: 0x4F), action: .logOnly, keyName: "右键"),
+        KeyMapping(usage: HIDUsage(page: 0xFF00, usage: 0x52), action: .delete, keyName: "返回键"),
+        KeyMapping(usage: HIDUsage(page: 0xFF00, usage: 0x51), action: .activateCodex, keyName: "菜单键"),
+        KeyMapping(usage: HIDUsage(page: 0xFF00, usage: 0x28), action: .fnModifier, keyName: "语音键")
     ]
 
     static let defaults = AppConfiguration(

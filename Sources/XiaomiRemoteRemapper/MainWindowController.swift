@@ -73,6 +73,7 @@ final class MainWindowController: NSWindowController {
         connection: ConnectionState,
         inputPermissionName: String,
         inputGranted: Bool,
+        inputRequired: Bool,
         accessibilityGranted: Bool,
         loginEnabled: Bool,
         lastKey: String?,
@@ -82,27 +83,34 @@ final class MainWindowController: NSWindowController {
         connectionLabel.stringValue = connection.displayName
         let connected: Bool
         if case .connected = connection { connected = true } else { connected = false }
-        let ready = connected && inputGranted && accessibilityGranted
+        let ready = connected && (!inputRequired || inputGranted) && accessibilityGranted
         statusIcon.contentTintColor = ready ? .systemGreen : .systemOrange
         statusIcon.image = NSImage(
             systemSymbolName: ready ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
             accessibilityDescription: ready ? "运行正常" : "需要设置"
         )
 
-        updatePermissionLabel(inputStatusLabel, granted: inputGranted, fallback: inputPermissionName)
+        if inputRequired {
+            updatePermissionLabel(inputStatusLabel, granted: inputGranted, fallback: inputPermissionName)
+        } else {
+            inputStatusLabel.stringValue = "● 不需要"
+            inputStatusLabel.textColor = .systemGreen
+        }
         updatePermissionLabel(
             accessibilityStatusLabel,
             granted: accessibilityGranted,
             fallback: "未授权"
         )
-        inputDetailLabel.stringValue = inputGranted
-            ? "已允许读取遥控器原始 HID 输入。"
-            : "用于读取遥控器原始 HID 按键；授权后可能需要重新打开程序。"
+        inputDetailLabel.stringValue = inputRequired
+            ? (inputGranted
+                ? "已允许读取遥控器原始 HID 输入。"
+                : "用于读取遥控器原始 HID 按键；授权后可能需要重新打开程序。")
+            : "C2-RC-LITE 使用应用内 BLE 通道读取，不需要输入监控。"
         accessibilityDetailLabel.stringValue = accessibilityGranted
             ? "已允许发送映射按键和聚焦 Codex 输入框。"
             : "用于发送 Delete、Fn、系统事件并聚焦 Codex 输入框。"
-        inputRequestButton.title = inputGranted ? "已完成" : "请求权限"
-        inputRequestButton.isEnabled = !inputGranted
+        inputRequestButton.title = inputRequired ? (inputGranted ? "已完成" : "请求权限") : "不需要"
+        inputRequestButton.isEnabled = inputRequired && !inputGranted
         accessibilityRequestButton.title = accessibilityGranted ? "已完成" : "请求权限"
         accessibilityRequestButton.isEnabled = !accessibilityGranted
         loginCheckbox.state = loginEnabled ? .on : .off
@@ -119,8 +127,8 @@ final class MainWindowController: NSWindowController {
 
     private func buildUI() {
         guard let contentView = window?.contentView else { return }
-        contentView.wantsLayer = true
-        contentView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        // Let NSWindow draw its adaptive background; a cached CGColor does not
+        // follow system appearance changes alongside the semantic text colors.
 
         let title = NSTextField(labelWithString: "蓝牙遥控器按键映射")
         title.font = .systemFont(ofSize: 20, weight: .semibold)
@@ -215,7 +223,7 @@ final class MainWindowController: NSWindowController {
             forInfoDictionaryKey: "CFBundleShortVersionString"
         ) as? String ?? "未知"
         let versionLabel = NSTextField(labelWithString: "版本 \(version)")
-        versionLabel.textColor = .tertiaryLabelColor
+        versionLabel.textColor = .secondaryLabelColor
         versionLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         versionLabel.setContentHuggingPriority(.required, for: .horizontal)
         let finishButton = NSButton(title: "完成设置并在后台运行", target: self, action: #selector(finishSetup))
@@ -401,7 +409,7 @@ final class MainWindowController: NSWindowController {
             key.widthAnchor.constraint(equalToConstant: 90).isActive = true
             let usage = NSTextField(labelWithString: mapping.technicalDescription)
             usage.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-            usage.textColor = .tertiaryLabelColor
+            usage.textColor = .secondaryLabelColor
             usage.widthAnchor.constraint(equalToConstant: 145).isActive = true
             let arrow = NSTextField(labelWithString: "→")
             arrow.textColor = .secondaryLabelColor

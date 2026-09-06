@@ -62,6 +62,13 @@ final class EventEmitter {
         if fnIsDown { postFn(isDown: false) }
     }
 
+    /// BLE remotes such as C2-RC-LITE only report a press notification and
+    /// provide no reliable release event. Their Fn action therefore uses an
+    /// explicit latch: press once to hold Fn, press again to release it.
+    func toggleFnModifier() {
+        postFn(isDown: !fnIsDown)
+    }
+
     private func postDelete(isDown: Bool) {
         if isDown {
             guard !deleteIsDown else { return }

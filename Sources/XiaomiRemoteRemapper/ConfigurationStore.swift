@@ -107,7 +107,9 @@ final class ConfigurationStore {
                     deviceName: device.name,
                     vendorID: device.vendorID,
                     productID: device.productID,
-                    mappings: device.isKnownXiaomiRemote ? AppConfiguration.defaultMappings : []
+                    mappings: device.isKnownXiaomiRemote
+                        ? AppConfiguration.defaultMappings
+                        : (device.isC2LiteRemote ? AppConfiguration.c2LiteDefaultMappings : [])
                 )
             )
         }
@@ -135,7 +137,13 @@ final class ConfigurationStore {
         configuration.selectedDeviceID = selectedDeviceID
         configuration.selectedDeviceName = selectedDeviceName
         configuration.deviceProfiles = profiles
-        setActiveMappings(activeProfile?.isKnownXiaomiRemote == true ? AppConfiguration.defaultMappings : [])
+        if activeProfile?.isKnownXiaomiRemote == true {
+            setActiveMappings(AppConfiguration.defaultMappings)
+        } else if activeProfile?.isC2LiteRemote == true {
+            setActiveMappings(AppConfiguration.c2LiteDefaultMappings)
+        } else {
+            setActiveMappings([])
+        }
         try save()
     }
 
@@ -215,6 +223,30 @@ final class ConfigurationStore {
                     if let mappingIndex = profiles[profileIndex].mappings.firstIndex(where: { $0.usage == defaultMapping.usage }) {
                         if profiles[profileIndex].mappings[mappingIndex].keyName != defaultMapping.keyName {
                             profiles[profileIndex].mappings[mappingIndex].keyName = defaultMapping.keyName
+                            changed = true
+                        }
+                    } else {
+                        profiles[profileIndex].mappings.append(defaultMapping)
+                        changed = true
+                    }
+                }
+            }
+        }
+
+        // C2-RC-LITE's five discovered bytes gained the same core shortcuts
+        // as the Xiaomi HID remote. Preserve deliberate custom actions; only
+        // replace the original "log only" placeholder.
+        if savedSchema < 7 {
+            for profileIndex in profiles.indices where profiles[profileIndex].isC2LiteRemote {
+                for defaultMapping in AppConfiguration.c2LiteDefaultMappings {
+                    if let mappingIndex = profiles[profileIndex].mappings.firstIndex(where: { $0.usage == defaultMapping.usage }) {
+                        if profiles[profileIndex].mappings[mappingIndex].keyName != defaultMapping.keyName {
+                            profiles[profileIndex].mappings[mappingIndex].keyName = defaultMapping.keyName
+                            changed = true
+                        }
+                        if profiles[profileIndex].mappings[mappingIndex].action == .logOnly,
+                           defaultMapping.action != .logOnly {
+                            profiles[profileIndex].mappings[mappingIndex].action = defaultMapping.action
                             changed = true
                         }
                     } else {

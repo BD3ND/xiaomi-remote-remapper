@@ -8,14 +8,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = ConfigurationStore()
     private let emitter = EventEmitter()
     private lazy var hidService = HIDService(store: store, emitter: emitter)
+    private lazy var c2LiteService = C2LiteBLEService(store: store, emitter: emitter)
     private lazy var settingsController = SettingsWindowController(
         store: store,
         onConfigurationChange: { [weak self] in
-            self?.hidService.restart()
+            self?.restartServices()
             self?.refreshMenu()
         },
         onLearningChange: { [weak self] enabled in
             self?.hidService.setLearningMode(enabled)
+            self?.c2LiteService.setLearningMode(enabled)
         }
     )
     private lazy var mainController = MainWindowController(
@@ -61,7 +63,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.settingsController.receiveInput(usage, isDown: isDown)
         }
         hidService.onDevicesChange = { [weak self] _ in self?.refreshMenu() }
+        c2LiteService.onStateChange = { [weak self] _ in self?.refreshMenu() }
+        c2LiteService.onInput = { [weak self] message in
+            self?.lastKeyItem.title = "最近按键：\(message)"
+            self?.lastKeyMessage = message
+            self?.refreshMenu()
+        }
+        c2LiteService.onRawInput = { [weak self] usage, isDown in
+            self?.settingsController.receiveInput(usage, isDown: isDown)
+        }
+        c2LiteService.onDevicesChange = { [weak self] _ in self?.refreshMenu() }
         hidService.start()
+        c2LiteService.start()
         refreshMenu()
         permissionTimer = Timer.scheduledTimer(
             timeInterval: 2,
@@ -72,7 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            let permissionsReady = self.hidService.inputMonitoringAccess == kIOHIDAccessTypeGranted
+            let permissionsReady = (!self.selectedDeviceIsC2
+                || self.hidService.inputMonitoringAccess == kIOHIDAccessTypeGranted)
                 && self.emitter.accessibilityTrusted
             if !UserDefaults.standard.bool(forKey: Self.onboardingCompletedKey) || !permissionsReady {
                 self.showMainWindow()
@@ -90,19 +104,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wakeRecoveryWorkItem?.cancel()
         permissionTimer?.invalidate()
         hidService.stop()
+        c2LiteService.stop()
         AppLogger.shared.log("application_stopped")
     }
 
     private func setupMenu() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // A square item reserves visible menu-bar space even before AppKit has
+        // measured the image. Variable-length image-only items can collapse to
+        // zero width on some menu-bar layouts.
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let statusImage = NSImage(
             systemSymbolName: "dot.radiowaves.left.and.right",
             accessibilityDescription: "蓝牙遥控器"
-        )
+        )?.withSymbolConfiguration(.init(pointSize: 14, weight: .medium))
         statusImage?.isTemplate = true
         statusItem.button?.image = statusImage
         statusItem.button?.imagePosition = .imageOnly
-        statusItem.button?.contentTintColor = nil
+        statusItem.button?.contentTintColor = .labelColor
+        statusItem.button?.setAccessibilityLabel("蓝牙遥控器按键映射")
+        statusItem.isVisible = true
 
         let menu = NSMenu()
         [connectionItem, inputPermissionItem, accessibilityItem, lastKeyItem].forEach {
@@ -148,7 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshMenu() {
-        connectionItem.title = "连接：\(hidService.state.displayName)"
+        connectionItem.title = "连接：\(activeConnectionState.displayName)"
         let inputAccess = hidService.inputMonitoringAccess
         inputPermissionItem.title = "输入监控：\(accessName(inputAccess))"
         accessibilityItem.title = "辅助功能：\(emitter.accessibilityTrusted ? "已授权" : "未授权")"
@@ -156,8 +176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
 
         let ready: Bool
-        if case .connected = hidService.state {
-            ready = inputAccess == kIOHIDAccessTypeGranted && emitter.accessibilityTrusted
+        if case .connected = activeConnectionState {
+            ready = (!selectedDeviceIsC2 || inputAccess == kIOHIDAccessTypeGranted) && emitter.accessibilityTrusted
         } else {
             ready = false
         }
@@ -167,13 +187,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             : "蓝牙遥控器按键映射：需要检查连接或权限"
         let loginEnabled = SMAppService.mainApp.status == .enabled
         mainController.refresh(
-            connection: hidService.state,
+            connection: activeConnectionState,
             inputPermissionName: accessName(inputAccess),
             inputGranted: inputAccess == kIOHIDAccessTypeGranted,
+            inputRequired: !selectedDeviceIsC2,
             accessibilityGranted: emitter.accessibilityTrusted,
             loginEnabled: loginEnabled,
             lastKey: lastKeyMessage,
-            availableDevices: hidService.availableDevices,
+            availableDevices: availableDevices,
             selectedDeviceID: store.configuration.selectedDeviceID
         )
     }
@@ -182,7 +203,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let currentAccess = hidService.inputMonitoringAccess
         if previousInputAccess != currentAccess {
             AppLogger.shared.log("input_monitoring_changed access=\(accessName(currentAccess))")
-            if currentAccess == kIOHIDAccessTypeGranted,
+            if !selectedDeviceIsC2,
+               currentAccess == kIOHIDAccessTypeGranted,
                case .failed = hidService.state {
                 hidService.restart()
             }
@@ -224,7 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func restartHID() {
-        hidService.restart()
+        restartServices()
         refreshMenu()
     }
 
@@ -250,7 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try store.selectDevice(device)
             AppLogger.shared.log("device_selected_by_user name=\(device.name) id=\(device.id)")
-            hidService.restart()
+            restartServices()
             refreshMenu()
         } catch {
             NSApp.presentError(error)
@@ -270,6 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wakeRecoveryWorkItem = nil
         AppLogger.shared.log("system_will_sleep")
         hidService.stop()
+        c2LiteService.stop()
     }
 
     @objc private func systemDidWake() {
@@ -283,7 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             scheduleWakeRecovery(reason: "session_active", delay: 2.0)
         } else if case .stopped = hidService.state {
             AppLogger.shared.log("session_became_active recovery=ordinary_start")
-            hidService.start()
+            restartServices()
         }
     }
 
@@ -297,10 +320,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.wakeRecoveryPending = false
             AppLogger.shared.log("wake_recovery_started reason=\(reason) mode=shared_suppressed")
             self.hidService.restart(preferSharedSuppressed: true)
+            self.c2LiteService.restart()
             self.refreshMenu()
         }
         wakeRecoveryWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+    private var selectedDeviceIsC2: Bool {
+        store.configuration.selectedDeviceID?.hasPrefix("ble-") == true
+    }
+
+    private var activeConnectionState: ConnectionState {
+        selectedDeviceIsC2 ? c2LiteService.state : hidService.state
+    }
+
+    private var availableDevices: [RemoteDeviceDescriptor] {
+        (hidService.availableDevices + c2LiteService.availableDevices)
+            .reduce(into: [String: RemoteDeviceDescriptor]()) { $0[$1.id] = $1 }
+            .values
+            .sorted { $0.selectionLabel.localizedStandardCompare($1.selectionLabel) == .orderedAscending }
+    }
+
+    private func restartServices() {
+        hidService.restart()
+        c2LiteService.restart()
     }
     @objc private func quit() { NSApp.terminate(nil) }
 }
