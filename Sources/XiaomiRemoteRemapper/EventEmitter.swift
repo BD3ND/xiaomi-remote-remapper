@@ -5,6 +5,8 @@ final class EventEmitter {
     private let source = CGEventSource(stateID: .combinedSessionState)
     private let codexInputFocuser = CodexInputFocuser()
     private var fnIsDown = false
+    var remoteFnChanged: ((Bool) -> Bool)?
+    private var fnGeneration = 0
     private var deleteIsDown = false
     private var deleteRepeatTimer: DispatchSourceTimer?
 
@@ -47,7 +49,15 @@ final class EventEmitter {
         case .delete:
             postDelete(isDown: isDown)
         case .fnModifier:
-            postFn(isDown: isDown)
+            fnGeneration += 1
+            let token = fnGeneration
+            let switched = remoteFnChanged?(isDown) ?? false
+            if isDown && switched {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    guard let self, self.fnGeneration == token else { return }
+                    self.postFn(isDown: true)
+                }
+            } else { postFn(isDown: isDown) }
         case .activateCodex:
             if isDown { codexInputFocuser.activateAndFocus() }
         case .power:
@@ -58,6 +68,8 @@ final class EventEmitter {
     }
 
     func releaseHeldInputs() {
+        fnGeneration += 1
+        _ = remoteFnChanged?(false)
         stopDeleteRepeat(postKeyUp: true)
         if fnIsDown { postFn(isDown: false) }
     }

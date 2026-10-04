@@ -4,6 +4,8 @@ if CommandLine.arguments.contains("--self-test") {
     exit(runSelfTests())
 } else if CommandLine.arguments.contains("--diagnostics") {
     exit(runDiagnostics())
+} else if CommandLine.arguments.contains("--test-voice-output-route") {
+    exit(runVoiceOutputRouteProbe())
 } else if CommandLine.arguments.contains("--request-permissions") {
     exit(requestPermissions())
 } else if CommandLine.arguments.contains("--probe-hid-open") {
@@ -14,6 +16,12 @@ if CommandLine.arguments.contains("--self-test") {
     exit(setLoginItem(enabled: false))
 } else if CommandLine.arguments.contains("--focus-codex-input") {
     exit(runCodexFocusProbe())
+} else if CommandLine.arguments.contains("--probe-xiaomi-voice") {
+    exit(runVoiceCapabilityProbe())
+} else if CommandLine.arguments.contains("--capture-xiaomi-voice-notify") {
+    exit(runVoiceNotificationCapture())
+} else if CommandLine.arguments.contains("--test-xiaomi-atvv") {
+    exit(runATVVVoiceFrameProbe())
 } else {
     let application = NSApplication.shared
     let delegate = AppDelegate()

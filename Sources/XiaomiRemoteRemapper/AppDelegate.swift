@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let emitter = EventEmitter()
     private lazy var hidService = HIDService(store: store, emitter: emitter)
     private lazy var c2LiteService = C2LiteBLEService(store: store, emitter: emitter)
+    private lazy var voiceService = RemoteVoiceService(store: store)
+    private lazy var voiceWindow = VoiceWindowController(service: voiceService)
     private lazy var settingsController = SettingsWindowController(
         store: store,
         onConfigurationChange: { [weak self] in
@@ -49,9 +51,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var wakeRecoveryPending = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        emitter.remoteFnChanged = { [weak self] down in self?.voiceService.remoteFnChanged(down) ?? false }
         NSApp.setActivationPolicy(.accessory)
         setupMenu()
         setupObservers()
+        mainController.showVoiceSettings = { [weak self] in self?.showVoice() }
 
         hidService.onStateChange = { [weak self] _ in self?.refreshMenu() }
         hidService.onInput = { [weak self] message in
@@ -75,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         c2LiteService.onDevicesChange = { [weak self] _ in self?.refreshMenu() }
         hidService.start()
         c2LiteService.start()
+        voiceService.start()
         refreshMenu()
         permissionTimer = Timer.scheduledTimer(
             timeInterval: 2,
@@ -105,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissionTimer?.invalidate()
         hidService.stop()
         c2LiteService.stop()
+        voiceService.stop()
         AppLogger.shared.log("application_stopped")
     }
 
@@ -132,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "打开控制面板…", action: #selector(showMainWindow), keyEquivalent: "")
         menu.addItem(withTitle: "按键映射…", action: #selector(showSettings), keyEquivalent: ",")
+        menu.addItem(withTitle: "遥控器麦克风…", action: #selector(showVoice), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "请求输入监控权限", action: #selector(requestInputPermission), keyEquivalent: "")
         menu.addItem(withTitle: "请求辅助功能权限", action: #selector(requestAccessibility), keyEquivalent: "")
@@ -236,6 +243,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsController.present()
     }
 
+    @objc private func showVoice() { voiceWindow.present() }
+
     @objc private func showMainWindow() {
         refreshMenu()
         mainController.present()
@@ -293,6 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLogger.shared.log("system_will_sleep")
         hidService.stop()
         c2LiteService.stop()
+        voiceService.stop()
     }
 
     @objc private func systemDidWake() {
@@ -321,6 +331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppLogger.shared.log("wake_recovery_started reason=\(reason) mode=shared_suppressed")
             self.hidService.restart(preferSharedSuppressed: true)
             self.c2LiteService.restart()
+            self.voiceService.restart()
             self.refreshMenu()
         }
         wakeRecoveryWorkItem = workItem
@@ -344,6 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func restartServices() {
         hidService.restart()
         c2LiteService.restart()
+        voiceService.restart()
     }
     @objc private func quit() { NSApp.terminate(nil) }
 }

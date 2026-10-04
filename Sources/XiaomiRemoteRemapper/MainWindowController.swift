@@ -1,6 +1,7 @@
 import AppKit
 
 final class MainWindowController: NSWindowController {
+    var showVoiceSettings: (() -> Void)?
     private let store: ConfigurationStore
     private let requestInputPermission: () -> Void
     private let requestAccessibilityPermission: () -> Void
@@ -209,9 +210,10 @@ final class MainWindowController: NSWindowController {
         loginCheckbox.action = #selector(loginItemChanged)
         let reconnectButton = NSButton(title: "重新连接", target: self, action: #selector(reconnectDevice))
         let logButton = NSButton(title: "打开日志", target: self, action: #selector(showLog))
+        let voiceButton = NSButton(title: "遥控器麦克风…", target: self, action: #selector(openVoiceSettings))
         let utilitySpacer = NSView()
         utilitySpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let utilities = NSStackView(views: [loginCheckbox, utilitySpacer, reconnectButton, logButton])
+        let utilities = NSStackView(views: [loginCheckbox, utilitySpacer, voiceButton, reconnectButton, logButton])
         utilities.orientation = .horizontal
         utilities.alignment = .centerY
         utilities.spacing = 10
@@ -273,6 +275,8 @@ final class MainWindowController: NSWindowController {
         ])
         rebuildMappings()
     }
+
+    @objc private func openVoiceSettings() { showVoiceSettings?() }
 
     private func refreshDevicePopup(
         devices: [RemoteDeviceDescriptor],

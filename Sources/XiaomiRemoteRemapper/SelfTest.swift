@@ -5,6 +5,7 @@ import ServiceManagement
 
 func runSelfTests() -> Int32 {
     var failures: [String] = []
+    failures.append(contentsOf: voiceAudioTests())
 
     let expected: [(HIDUsage, RemoteAction)] = [
         (HIDUsage(page: 7, usage: 241), .delete),
@@ -275,7 +276,7 @@ func runSelfTests() -> Int32 {
     }
 
     if failures.isEmpty {
-        print("self_test_passed assertions=51")
+        print("self_test_passed assertions=51 voice_audio_checks=9")
         return 0
     }
     failures.forEach { fputs("self_test_failed \($0)\n", stderr) }

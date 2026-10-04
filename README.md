@@ -1,5 +1,7 @@
 # 蓝牙遥控器 macOS 原生按键映射
 
+0.6.2 新增默认关闭的 2 Pro（RC003）遥控器麦克风转发与自动切换。安装外部 BlackHole 2ch 后，自动模式下豆包请选择“自动检测”；手动模式选择 BlackHole。仿小米 2.8 和 C2 目前仅支持按键，不支持麦克风。使用与验证边界见 [遥控器语音说明](docs/remote-voice.md)。
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue.svg)](https://support.apple.com/macos)
 
